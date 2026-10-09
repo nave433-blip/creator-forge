@@ -195,3 +195,25 @@ def test_init_scaffolds_example_configs(tmp_path):
         p = target / name
         assert p.is_file(), f"{name} was not scaffolded by forge init"
         assert p.stat().st_size > 0, f"{name} scaffolded empty"
+
+
+def test_menu_sections_reference_real_cli_functions():
+    """Every menu entry must name a real forge.cli function (no dead items)."""
+    import inspect
+    import forge.cli as C
+    import forge.menu as M
+    for title, items in M.SECTIONS:
+        for label, func_name, params in items:
+            assert hasattr(C, func_name), f"{title} / {label}: {func_name}"
+            sig = inspect.signature(getattr(C, func_name))
+            for pname, _prompt, _default in params:
+                key = pname[:-3] if pname.endswith("...") else pname
+                assert key in sig.parameters, \
+                    f"{label}: param {key!r} not in {func_name}()"
+
+
+def test_menu_covers_promo_and_telegram():
+    import forge.menu as M
+    titles = [t for t, _ in M.SECTIONS]
+    assert any("Promo" in t for t in titles)
+    assert any("Telegram" in t for t in titles)
