@@ -72,8 +72,16 @@ def load_config(explicit: str | None = None) -> ForgeConfig:
     path = _find_config(explicit)
     data: dict[str, Any] = {}
     if path is not None:
-        with path.open("r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                data = yaml.safe_load(fh) or {}
+        except yaml.YAMLError as e:
+            raise ValueError(
+                f"Bad YAML in config file {path}: {e}") from e
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Config file {path} must contain a mapping of settings, "
+                f"got {type(data).__name__}.")
     data = _apply_env_overrides(data)
     data.setdefault("_config_path", str(path) if path else None)
     return ForgeConfig(data)

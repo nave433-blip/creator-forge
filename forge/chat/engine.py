@@ -14,6 +14,7 @@ Components:
 from __future__ import annotations
 
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -67,44 +68,58 @@ class Draft:
 
 
 class ApprovalQueue:
-    """In-memory approval queue. The dashboard persists decisions per session."""
+    """In-memory approval queue. The dashboard persists decisions per session.
+
+    Thread-safe: the dashboard serves requests from worker threads, so ids
+    are handed out under a lock (no duplicates) and approve/reject/mark_sent
+    are atomic check-and-set (exactly one decision wins a race).
+    """
 
     def __init__(self):
         self._drafts: list[Draft] = []
         self._next_id = 1
+        self._lock = threading.Lock()
 
     def add(self, *, platform: str, sender: str, incoming: str,
             reply: str, trigger: str) -> Draft:
-        draft = Draft(id=self._next_id, platform=platform, sender=sender,
-                      incoming=incoming, reply=reply, trigger=trigger)
-        self._next_id += 1
-        self._drafts.append(draft)
-        return draft
+        with self._lock:
+            draft = Draft(id=self._next_id, platform=platform, sender=sender,
+                          incoming=incoming, reply=reply, trigger=trigger)
+            self._next_id += 1
+            self._drafts.append(draft)
+            return draft
 
     def pending(self) -> list[Draft]:
-        return [d for d in self._drafts if d.status == "pending"]
+        with self._lock:
+            return [d for d in self._drafts if d.status == "pending"]
 
-    def get(self, draft_id: int) -> Draft:
+    def _get_locked(self, draft_id: int) -> Draft:
         for d in self._drafts:
             if d.id == draft_id:
                 return d
         raise KeyError(f"No draft with id {draft_id}")
 
+    def get(self, draft_id: int) -> Draft:
+        with self._lock:
+            return self._get_locked(draft_id)
+
     def approve(self, draft_id: int) -> Draft:
-        d = self.get(draft_id)
-        if d.status != "pending":
-            raise ValueError(f"Draft {draft_id} is already {d.status}")
-        d.status = "approved"
-        d.decided_at = time.time()
-        return d
+        with self._lock:
+            d = self._get_locked(draft_id)
+            if d.status != "pending":
+                raise ValueError(f"Draft {draft_id} is already {d.status}")
+            d.status = "approved"
+            d.decided_at = time.time()
+            return d
 
     def reject(self, draft_id: int) -> Draft:
-        d = self.get(draft_id)
-        if d.status != "pending":
-            raise ValueError(f"Draft {draft_id} is already {d.status}")
-        d.status = "rejected"
-        d.decided_at = time.time()
-        return d
+        with self._lock:
+            d = self._get_locked(draft_id)
+            if d.status != "pending":
+                raise ValueError(f"Draft {draft_id} is already {d.status}")
+            d.status = "rejected"
+            d.decided_at = time.time()
+            return d
 
     def mark_sent(self, draft_id: int) -> Draft:
         """Record that an approved draft was actually sent.
@@ -113,17 +128,19 @@ class ApprovalQueue:
         or an approved integration); this just flips the bookkeeping. It
         refuses to mark drafts that were never approved.
         """
-        d = self.get(draft_id)
-        if d.status != "approved":
-            raise ValueError(
-                f"Refusing to mark draft {draft_id} sent: status is "
-                f"{d.status!r}, must be 'approved' first.")
-        d.status = "sent"
-        d.decided_at = time.time()
-        return d
+        with self._lock:
+            d = self._get_locked(draft_id)
+            if d.status != "approved":
+                raise ValueError(
+                    f"Refusing to mark draft {draft_id} sent: status is "
+                    f"{d.status!r}, must be 'approved' first.")
+            d.status = "sent"
+            d.decided_at = time.time()
+            return d
 
     def all(self) -> list[Draft]:
-        return list(self._drafts)
+        with self._lock:
+            return list(self._drafts)
 
     def save(self, path: str | Path) -> None:
         """Persist the queue to JSON so CLI runs share state."""

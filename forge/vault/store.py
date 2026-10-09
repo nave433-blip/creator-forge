@@ -122,14 +122,27 @@ class Vault:
 
     def _key(self) -> bytes:
         try:
-            payload = json.loads(self.session_path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError) as e:
+            raw = self.session_path.read_text(encoding="utf-8")
+        except FileNotFoundError as e:
             raise VaultLockedError(
                 "Vault is locked. Run `forge vault unlock` first.") from e
-        if payload.get("expires", 0) < time.time():
+        try:
+            payload = json.loads(raw)
+            key_hex = payload["key"]
+            expires = payload.get("expires", 0)
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            raise VaultLockedError(
+                "Vault session file is corrupt. Run `forge vault unlock`"
+                " again.") from e
+        if expires < time.time():
             self.lock()
             raise VaultLockedError("Vault session expired. Unlock again.")
-        return bytes.fromhex(payload["key"])
+        try:
+            return bytes.fromhex(key_hex)
+        except (ValueError, TypeError) as e:
+            raise VaultLockedError(
+                "Vault session file is corrupt. Run `forge vault unlock`"
+                " again.") from e
 
     # -- blobs ---------------------------------------------------------------
     def _blob_path(self, name: str) -> Path:
@@ -152,6 +165,10 @@ class Vault:
             return AESGCM(key).decrypt(nonce, ct, None)
         except InvalidTag as e:
             raise VaultError(f"Blob {name!r} failed integrity check.") from e
+        except ValueError as e:
+            # Truncated blob: nonce shorter than 8 bytes, etc.
+            raise VaultError(
+                f"Blob {name!r} is truncated or corrupt.") from e
 
     def list(self) -> list[str]:
         self._key()  # ensure unlocked
