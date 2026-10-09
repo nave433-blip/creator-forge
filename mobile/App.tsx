@@ -19,8 +19,11 @@ import CRMScreen from './src/screens/CRMScreen';
 import StreamScreen from './src/screens/StreamScreen';
 import FlowsScreen from './src/screens/FlowsScreen';
 import IdeasScreen from './src/screens/IdeasScreen';
+import TubeScreen from './src/screens/TubeScreen';
+import LexiconScreen from './src/screens/LexiconScreen';
+import AIScreen from './src/screens/AIScreen';
 
-type Tab = 'catalog' | 'identity' | 'chat' | 'pay' | 'packets' | 'schedule' | 'analytics' | 'templates' | 'triage' | 'spicy' | 'orders' | 'live' | 'crm' | 'stream' | 'flows' | 'ideas' | 'setup';
+type Tab = 'catalog' | 'identity' | 'chat' | 'pay' | 'packets' | 'schedule' | 'analytics' | 'templates' | 'triage' | 'spicy' | 'orders' | 'live' | 'crm' | 'stream' | 'flows' | 'ideas' | 'tube' | 'lexicon' | 'ai' | 'setup';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'chat', label: 'Chat' },
@@ -32,6 +35,9 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'stream', label: 'Stream' },
   { key: 'flows', label: 'Flows' },
   { key: 'ideas', label: 'Ideas' },
+  { key: 'tube', label: 'Tube' },
+  { key: 'lexicon', label: 'Words' },
+  { key: 'ai', label: 'AI' },
   { key: 'schedule', label: 'Schedule' },
   { key: 'templates', label: 'Replies' },
   { key: 'analytics', label: 'Stats' },
@@ -77,6 +83,12 @@ function Shell() {
           <FlowsScreen />
         ) : tab === 'ideas' ? (
           <IdeasScreen />
+        ) : tab === 'tube' ? (
+          <TubeScreen />
+        ) : tab === 'lexicon' ? (
+          <LexiconScreen />
+        ) : tab === 'ai' ? (
+          <AIScreen />
         ) : tab === 'schedule' ? (
           <ScheduleScreen />
         ) : tab === 'templates' ? (

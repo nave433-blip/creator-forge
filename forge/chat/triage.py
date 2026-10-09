@@ -134,7 +134,7 @@ class TriageQueue:
         self.thumbs_dir = Path(thumbs_dir)
         self.thumbs_dir.mkdir(parents=True, exist_ok=True)
         self.classifier = classifier or NullNSFWClassifier()
-        self._conn = sqlite3.connect(str(self.db_path))
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)  # dashboard serves requests from worker threads
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

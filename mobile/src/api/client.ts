@@ -526,3 +526,99 @@ export interface PeakSlot {
 
 export const getPeakTimes = (s: BackendSettings) =>
   apiGet<{ peak_times: PeakSlot[] }>(s, '/analytics/peak-times');
+
+/* ---- tube sites (manual-assist) + word bank ---- */
+
+export interface TubeSiteInfo {
+  site: string;
+  key: string;
+  upload: string;
+  verification: string;
+  monetization: string;
+}
+
+export interface TubeMetadata {
+  site: string;
+  title: string;
+  description: string;
+  tags: string[];
+  tags_truncated: boolean;
+  notes: string[];
+}
+
+export const getTubeSites = (s: BackendSettings) =>
+  apiGet<{ sites: TubeSiteInfo[] }>(s, '/tube/sites');
+
+export const previewTubeMetadata = (
+  s: BackendSettings,
+  site: string,
+  opts: { name?: string; tags?: string[] } = {},
+) =>
+  apiPost<TubeMetadata>(s, '/tube/metadata', {
+    body: JSON.stringify({ site, name: opts.name || '', tags: opts.tags || [] }),
+  });
+
+export const buildTubePacket = (
+  s: BackendSettings,
+  video: string,
+  site: string,
+  opts: { name?: string; tags?: string[] } = {},
+) =>
+  apiPost<{ packet: string }>(s, '/tube/packet', {
+    body: JSON.stringify({
+      video,
+      site,
+      name: opts.name || '',
+      tags: opts.tags || [],
+    }),
+  });
+
+export interface LexiconEntry {
+  term: string;
+  note: string;
+  added: number;
+}
+
+export const getLexicon = (s: BackendSettings) =>
+  apiGet<{ categories: Record<string, LexiconEntry[]> }>(s, '/chat/lexicon');
+
+export const addLexiconTerm = (
+  s: BackendSettings,
+  category: string,
+  term: string,
+  note = '',
+) =>
+  apiPost<{ added: boolean; category: string; term: string }>(
+    s,
+    '/chat/lexicon/add',
+    { body: JSON.stringify({ category, term, note }) },
+  );
+
+export const removeLexiconTerm = (
+  s: BackendSettings,
+  category: string,
+  term: string,
+) =>
+  apiPost<{ removed: boolean }>(s, '/chat/lexicon/remove', {
+    body: JSON.stringify({ category, term }),
+  });
+
+export interface AIProviderStatus {
+  provider: string;
+  model: string;
+  configured: boolean;
+  docs: string;
+}
+
+export interface AIAnswer {
+  provider: string;
+  model: string;
+  text: string;
+  draft: boolean;
+}
+
+export const getAIProviders = (s: BackendSettings) =>
+  apiGet<{ providers: AIProviderStatus[] }>(s, '/ai/providers');
+
+export const aiAsk = (s: BackendSettings, body: Record<string, unknown>) =>
+  apiPost<AIAnswer>(s, '/ai/ask', { body: JSON.stringify(body) });

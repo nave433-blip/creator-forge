@@ -93,6 +93,8 @@ limits of each. If a feature isn't listed here, it doesn't exist.
   learned profile when drafting. `lexicon-adopt` promotes words the style
   profiler found into the bank for her review. Templates can use
   {pet_name} {phrase} {slang} {emoji} {opener} {closer} placeholders.
+- Also in the Linux GUI (Word bank screen) and the Android app (Words
+  tab): add/remove words from her phone.
 
 ## Spicy chat (her request — consent-gated)
 
@@ -212,9 +214,24 @@ Auto-discovered from `forge/skills/builtin/` + `skills.paths`:
   site's upload URL and tips.
 - `forge tube bulk --dir ./clips --sites pornhub,xvideos,xnxx` --
   packets for a whole folder x many sites + manifest CSV.
+- `--template 0-3` picks the title template; the GUI shows all four.
 - Metadata engine: title templates (per-site length limits), descriptions
   with her payment links baked in, auto-tags (her custom tags > catalog
   tags > curated taxonomy matched from the scene), per-site tag limits.
+  When a site's tag cap cuts tags, you get a warning telling you to put
+  the strongest tags first in `--tags`.
+- Also in the Linux GUI (Tube screen) and the Android app (Tube tab).
+
+## Public AI providers (Grok / Gemini / Claude)
+
+- `forge ai providers` -- which backends have keys (never leaks keys).
+- `forge ai ask|caption|titles|hashtags|ideas|scene-ideas|polish|promo` --
+  writing help; everything returned is a **draft** for her review.
+- `forge ai reply-assist --incoming "..."` -- two reply options; add
+  `--platform` + `--sender` to drop it in the approval queue.
+- Needs HER paid API keys (`ai:` in forge.yaml or XAI_API_KEY /
+  GEMINI_API_KEY / ANTHROPIC_API_KEY). No key = clear setup error,
+  never a fake answer. Full doc: `docs/AI.md`.
 
 ## Mobile (Android)
 

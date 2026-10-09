@@ -128,10 +128,12 @@ class VideoMetadata:
     description: str
     tags: list[str] = field(default_factory=list)
     notes: tuple[str, ...] = ()
+    tags_truncated: bool = False  # True if the site's tag limit cut some
 
     def to_dict(self) -> dict:
         return {"site": self.site_key, "title": self.title,
                 "description": self.description, "tags": self.tags,
+                "tags_truncated": self.tags_truncated,
                 "notes": list(self.notes)}
 
 
@@ -142,8 +144,9 @@ def generate_metadata(site: TubeSite, scene: dict | None = None,
                       extra_description: str = "",
                       template_idx: int = 0) -> VideoMetadata:
     """Full metadata packet for one video on one site."""
-    tags = suggest_tags(scene, catalog_tags, custom_tags,
-                        max_tags=site.max_tags)
+    all_tags = suggest_tags(scene, catalog_tags, custom_tags,
+                            max_tags=10_000)
+    tags = all_tags[:site.max_tags]
     return VideoMetadata(
         site_key=site.key,
         title=build_title(scene, name, template_idx, site.title_limit),
@@ -151,5 +154,6 @@ def generate_metadata(site: TubeSite, scene: dict | None = None,
             scene, links, hashtags=tags,
             extra=extra_description, limit=site.description_limit),
         tags=tags,
+        tags_truncated=len(all_tags) > len(tags),
         notes=site.notes,
     )

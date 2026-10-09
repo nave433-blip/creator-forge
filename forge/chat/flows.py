@@ -73,7 +73,7 @@ class FlowRunner:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.flows = flows or BUILTIN_FLOWS
-        self._conn = sqlite3.connect(str(self.db_path))
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)  # dashboard serves requests from worker threads
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
@@ -88,6 +88,8 @@ class FlowRunner:
             raise ValueError(
                 f"Unknown flow {flow!r}. Available: "
                 + ", ".join(sorted(self.flows)))
+        if not platform.strip() or not handle.strip():
+            raise ValueError("enroll needs a non-empty platform and handle.")
         now = _now()
         try:
             self._conn.execute(
@@ -161,9 +163,10 @@ class FlowRunner:
         return step
 
     def render(self, template: str, handle: str) -> str:
-        first = handle.split()[0]
-        return template.replace("{handle}", handle).replace("{first}",
-                                                           first)
+        handle = (handle or "").strip()
+        first = handle.split()[0] if handle else "there"
+        return template.replace("{handle}", handle or "there").replace(
+            "{first}", first)
 
 
 def run_due(runner: FlowRunner, engine: Any) -> list[Any]:
@@ -174,7 +177,13 @@ def run_due(runner: FlowRunner, engine: Any) -> list[Any]:
     """
     drafts = []
     for run in runner.due_steps():
-        step = runner.current_step(run)
+        try:
+            step = runner.current_step(run)
+        except (IndexError, KeyError):
+            # Stale run: the flow was edited/removed after enrollment.
+            # Close it quietly instead of crashing the whole batch.
+            runner.cancel(run["flow"], run["platform"], run["handle"])
+            continue
         text = runner.render(step["template"], run["handle"])
         draft = engine.queue.add(platform=run["platform"],
                                  sender=run["handle"],

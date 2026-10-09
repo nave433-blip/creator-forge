@@ -104,5 +104,9 @@ def run_skill(name: str, args: list[str], config: Any = None) -> str:
         return skill.run(args)
     except SkillError:
         raise
+    except SystemExit as e:
+        # argparse usage errors (bad skill args) -- not a crash
+        raise SkillError(f"Skill {name!r}: bad arguments (exit {e.code}). "
+                         f"See `forge skills run {name} --help`.")
     except Exception as e:
         raise SkillError(f"Skill {name!r} failed: {e}") from e

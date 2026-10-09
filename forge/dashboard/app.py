@@ -51,8 +51,9 @@ def _require_token(
     expected = _state.get("config", {}).get_path("dashboard.api_token")
     if not expected:
         return
+    import hmac
     if creds is None or creds.scheme.lower() != "bearer" \
-            or creds.credentials != expected:
+            or not hmac.compare_digest(creds.credentials, str(expected)):
         raise HTTPException(401, "Invalid or missing API token.")
 
 
@@ -523,6 +524,60 @@ async def tube_packet_endpoint(request: Request,
                         custom_tags=body.get("tags") or [],
                         links=build_payment_links(_config()))
     return JSONResponse({"packet": str(dest)})
+
+
+# -- public AI providers ---------------------------------------------------------
+@app.get("/ai/providers")
+def ai_providers_endpoint(_: None = Depends(_require_token)) -> JSONResponse:
+    """Provider status (configured or not; never leaks keys)."""
+    from forge.ai.providers import provider_status
+    return JSONResponse({"providers": provider_status(_config())})
+
+
+@app.post("/ai/ask")
+async def ai_ask_endpoint(request: Request,
+                          _: None = Depends(_require_token)) -> JSONResponse:
+    """Ask the AI. Body: {prompt, provider?, task?, topic?}.
+
+    task: ask|caption|titles|hashtags|ideas|scene-ideas|polish|reply-assist|promo
+    Everything returned is a draft for her review.
+    """
+    from forge.ai import tasks as T
+    from forge.ai.providers import AINotConfiguredError, resolve_provider
+    body = await request.json()
+    task = (body.get("task") or "ask").strip()
+    try:
+        provider = resolve_provider(body.get("provider"), _config())
+    except KeyError as e:
+        raise HTTPException(400, str(e))
+    handlers = {
+        "ask": lambda: T.ask(provider, body.get("prompt", "")),
+        "caption": lambda: T.captions(provider, body.get("topic", ""),
+                                      int(body.get("n", 3)),
+                                      body.get("tone", "playful")),
+        "titles": lambda: T.titles(provider, body.get("topic", ""),
+                                   int(body.get("n", 5))),
+        "hashtags": lambda: T.hashtags(provider, body.get("topic", ""),
+                                      int(body.get("n", 10))),
+        "ideas": lambda: T.content_ideas(provider, body.get("niche", ""),
+                                        int(body.get("n", 10))),
+        "scene-ideas": lambda: T.scene_ideas(provider, body.get("vibe", ""),
+                                             int(body.get("n", 5))),
+        "polish": lambda: T.polish(provider, body.get("text", "")),
+        "reply-assist": lambda: T.reply_assist(provider,
+                                              body.get("incoming", ""),
+                                              body.get("context", "")),
+        "promo": lambda: T.promo_text(provider, body.get("item", ""),
+                                     body.get("price", "")),
+    }
+    if task not in handlers:
+        raise HTTPException(400, f"Unknown task {task!r}.")
+    try:
+        resp = handlers[task]()
+    except AINotConfiguredError as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse({"provider": resp.provider, "model": resp.model,
+                         "text": resp.text, "draft": True})
 
 
 # -- spicy chat (consent-gated) + triage ---------------------------------------

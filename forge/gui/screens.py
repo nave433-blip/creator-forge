@@ -1614,6 +1614,314 @@ class IdeasScreen(_Base):
             ["#", "Caption", "Hashtags"], rows))
 
 
+# -- Tube uploads ------------------------------------------------------------
+class TubeScreen(_Base):
+    def __init__(self, config: ForgeConfig):
+        super().__init__(config)
+        self.title("Tube uploads")
+        self.hint("Pornhub, XVideos, XNXX, xHamster, RedTube, YouPorn. "
+                  "Honest note: none of these sites offer an upload API, so "
+                  "this builds a ready-to-paste packet (title, description, "
+                  "tags, checklist) -- she publishes on each site herself.")
+        from forge.tube.sites import site_keys
+        form = QFormLayout()
+        self.site = QComboBox()
+        self.site.addItems(site_keys())
+        self.video = QLineEdit()
+        self.video.setPlaceholderText("video file path")
+        pick = QPushButton("Browse…")
+        pick.setObjectName("Ghost")
+        pick.clicked.connect(self._browse)
+        vrow = QHBoxLayout()
+        vrow.addWidget(self.video)
+        vrow.addWidget(pick)
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("her display name")
+        self.tags = QLineEdit()
+        self.tags.setPlaceholderText("custom tags, comma-separated")
+        from forge.tube.metadata import TITLE_TEMPLATES
+        self.template = QComboBox()
+        self.template.addItems(
+            [f"Template {i + 1}: {t}" for i, t in enumerate(TITLE_TEMPLATES)])
+        form.addRow("Site", self.site)
+        form.addRow("Video", vrow)
+        form.addRow("Name", self.name)
+        form.addRow("Tags", self.tags)
+        form.addRow("Title template", self.template)
+        self.layout.addLayout(form)
+        row = QHBoxLayout()
+        preview = QPushButton("Preview metadata")
+        preview.clicked.connect(self._preview)
+        packet = QPushButton("Build packet")
+        packet.clicked.connect(self._packet)
+        row.addWidget(preview)
+        row.addWidget(packet)
+        row.addStretch(1)
+        self.layout.addLayout(row)
+        self.out = QTextEdit()
+        self.out.setReadOnly(True)
+        self.out.setObjectName("Dim")
+        self.layout.addWidget(self.out)
+        self.layout.addStretch(1)
+
+    def _browse(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Pick a video", "",
+            "Video (*.mp4 *.mov *.webm *.m4v)")
+        if path:
+            self.video.setText(path)
+
+    def _meta(self):
+        from forge.pay.links import build_payment_links
+        from forge.tube.metadata import generate_metadata
+        from forge.tube.sites import get_site
+        site = get_site(self.site.currentText())
+        tags = [t.strip() for t in self.tags.text().split(",") if t.strip()]
+        return site, generate_metadata(
+            site, None, name=self.name.text().strip(),
+            custom_tags=tags, links=build_payment_links(self.config),
+            template_idx=self.template.currentIndex())
+
+    @_wrap
+    def _preview(self):
+        site, meta = self._meta()
+        self.out.setPlainText(
+            f"TITLE ({len(meta.title)}/{site.title_limit} chars):\n"
+            f"{meta.title}\n\n"
+            f"TAGS ({len(meta.tags)}/{site.max_tags}):\n"
+            f"{', '.join(meta.tags)}\n\n"
+            f"DESCRIPTION:\n{meta.description}")
+
+    @_wrap
+    def _packet(self):
+        from forge.pay.links import build_payment_links
+        from forge.tube.packets import build_packet
+        from forge.tube.sites import get_site
+        video = self.video.text().strip()
+        if not video:
+            W.show_error(self, "No video", "Pick a video file first.")
+            return
+        site = get_site(self.site.currentText())
+        tags = [t.strip() for t in self.tags.text().split(",") if t.strip()]
+        dest = build_packet(
+            video, site,
+            self.config.get_path("post.packets_dir", "./forge-data/packets"),
+            name=self.name.text().strip(), custom_tags=tags,
+            links=build_payment_links(self.config),
+            template_idx=self.template.currentIndex())
+        W.show_info(self, "Packet ready",
+                    f"Upload packet built at:\n{dest}\n\n"
+                    f"Copy the title/description/tags into {site.name}'s "
+                    f"upload page, then publish there.")
+
+
+# -- Word bank -----------------------------------------------------------------
+class LexiconScreen(_Base):
+    def __init__(self, config: ForgeConfig):
+        super().__init__(config)
+        self.title("Word bank")
+        self.hint("Her saved dictionary: slang, signature phrases, pet "
+                  "names, go-to emoji, openers, closers (+ a spicy shelf). "
+                  "The chat drafts use her words first, so the bot sounds "
+                  "like her.")
+        from forge.chat.lexicon import CATEGORIES
+        form = QFormLayout()
+        self.category = QComboBox()
+        self.category.addItems(list(CATEGORIES))
+        self.term = QLineEdit()
+        self.term.setPlaceholderText("word or phrase")
+        self.note = QLineEdit()
+        self.note.setPlaceholderText("note (optional)")
+        form.addRow("Category", self.category)
+        form.addRow("Term", self.term)
+        form.addRow("Note", self.note)
+        self.layout.addLayout(form)
+        row = QHBoxLayout()
+        add = QPushButton("Add word")
+        add.clicked.connect(self._add)
+        remove = QPushButton("Remove selected")
+        remove.setObjectName("Ghost")
+        remove.clicked.connect(self._remove)
+        adopt = QPushButton("Adopt learned words")
+        adopt.setObjectName("Ghost")
+        adopt.clicked.connect(self._adopt)
+        row.addWidget(add)
+        row.addWidget(remove)
+        row.addWidget(adopt)
+        row.addStretch(1)
+        self.layout.addLayout(row)
+        self.list = QTextEdit()
+        self.list.setReadOnly(True)
+        self.list.setObjectName("Dim")
+        self.layout.addWidget(self.list)
+        self.layout.addStretch(1)
+        self._refresh()
+
+    def _lex(self):
+        from forge.chat.lexicon import CustomLexicon
+        return CustomLexicon.load(self.config.get_path(
+            "chat.lexicon_path", "./forge-data/lexicon.json"))
+
+    def _save(self, lex):
+        lex.save(self.config.get_path(
+            "chat.lexicon_path", "./forge-data/lexicon.json"))
+
+    @_wrap
+    def _refresh(self):
+        lex = self._lex()
+        lines = []
+        for cat, items in lex.list().items():
+            if items:
+                lines.append(f"[{cat}]")
+                lines.extend(f"  - {e.term}" + (f" ({e.note})" if e.note
+                                                 else "")
+                             for e in items)
+        self.list.setPlainText("\n".join(lines) or
+                               "Word bank is empty -- add her words above.")
+
+    @_wrap
+    def _add(self):
+        term = self.term.text().strip()
+        if not term:
+            W.show_error(self, "No term", "Type a word or phrase first.")
+            return
+        lex = self._lex()
+        if lex.add(self.category.currentText(), term,
+                   self.note.text().strip()):
+            self._save(lex)
+            self.term.clear()
+            self.note.clear()
+        self._refresh()
+
+    @_wrap
+    def _remove(self):
+        # removes the term typed in the Term box from the chosen category
+        term = self.term.text().strip()
+        if not term:
+            W.show_error(self, "No term",
+                         "Type the word to remove in the Term box first.")
+            return
+        lex = self._lex()
+        if lex.remove(self.category.currentText(), term):
+            self._save(lex)
+            W.show_info(self, "Removed", term)
+        else:
+            W.show_error(self, "Not found", f"{term!r} isn't in "
+                         f"{self.category.currentText()}.")
+        self._refresh()
+
+    @_wrap
+    def _adopt(self):
+        from forge.chat.style import StyleProfile
+        import json
+        prof_path = self.config.get_path("chat.style_profile_path",
+                                         "./style-profile.json")
+        p = Path(prof_path)
+        if not p.is_file():
+            W.show_error(self, "No style profile",
+                         "Build one first: forge chat style-build.")
+            return
+        prof = StyleProfile.from_dict(
+            json.loads(p.read_text(encoding="utf-8")))
+        lex = self._lex()
+        added = lex.adopt_from_profile(prof, n=10)
+        self._save(lex)
+        W.show_info(self, "Adopted",
+                    f"Added {len(added)} word(s): "
+                    f"{', '.join(added) or '(none new)'}\nReview them above.")
+        self._refresh()
+
+
+# -- Public AI helpers ---------------------------------------------------------
+class AIScreen(_Base):
+    TASKS = [
+        ("ask", "Ask anything"),
+        ("caption", "Captions"),
+        ("titles", "Video titles"),
+        ("hashtags", "Hashtags"),
+        ("ideas", "Content ideas"),
+        ("scene-ideas", "Scene ideas"),
+        ("polish", "Polish my draft"),
+        ("reply-assist", "Reply assist"),
+        ("promo", "Promo lines"),
+    ]
+
+    def __init__(self, config: ForgeConfig):
+        super().__init__(config)
+        self.title("AI helpers")
+        hint_text = ("Grok, Gemini, Claude with her own API keys. Everything "
+                     "that comes back is a DRAFT for her review -- nothing "
+                     "posts or sends itself. No key = a setup error, never "
+                     "a fake answer.")
+        try:
+            from forge.ai.providers import provider_status
+            missing = [p["provider"] for p in provider_status(config)
+                       if not p["configured"]]
+            if missing:
+                hint_text += (f" Missing keys: {', '.join(missing)} "
+                              f"(set ai.*_api_key in forge.yaml or env vars).")
+        except Exception:
+            pass
+        self.hint(hint_text)
+        form = QFormLayout()
+        self.provider = QComboBox()
+        self.provider.addItems(["grok", "gemini", "claude"])
+        self.task = QComboBox()
+        self.task.addItems([label for _, label in self.TASKS])
+        self.input = QLineEdit()
+        self.input.setPlaceholderText(
+            "topic / prompt / her draft text -- depends on the task")
+        form.addRow("Provider", self.provider)
+        form.addRow("Task", self.task)
+        form.addRow("Input", self.input)
+        self.layout.addLayout(form)
+        row = QHBoxLayout()
+        run = QPushButton("Run")
+        run.clicked.connect(self._run)
+        row.addWidget(run)
+        row.addStretch(1)
+        self.layout.addLayout(row)
+        self.out = QTextEdit()
+        self.out.setReadOnly(True)
+        self.out.setObjectName("Dim")
+        self.layout.addWidget(self.out)
+        self.layout.addStretch(1)
+
+    @_wrap
+    def _run(self):
+        from forge.ai import tasks as T
+        from forge.ai.providers import resolve_provider
+        text = self.input.text().strip()
+        if not text:
+            W.show_error(self, "No input", "Type something first.")
+            return
+        key = self.TASKS[self.task.currentIndex()][0]
+        provider = resolve_provider(self.provider.currentText(), self.config)
+        if key == "ask":
+            resp = T.ask(provider, text)
+        elif key == "caption":
+            resp = T.captions(provider, text)
+        elif key == "titles":
+            resp = T.titles(provider, text)
+        elif key == "hashtags":
+            resp = T.hashtags(provider, text)
+        elif key == "ideas":
+            resp = T.content_ideas(provider, text)
+        elif key == "scene-ideas":
+            resp = T.scene_ideas(provider, text)
+        elif key == "polish":
+            resp = T.polish(provider, text)
+        elif key == "reply-assist":
+            resp = T.reply_assist(provider, text)
+        else:
+            parts = text.rsplit(" ", 1)
+            item, price = (parts[0], parts[1]) if len(parts) == 2 else (text, "")
+            resp = T.promo_text(provider, item, price)
+        self.out.setPlainText(
+            f"[{resp.provider} / {resp.model}] -- draft, not sent anywhere\n\n"
+            f"{resp.text}")
+
+
 SCREENS: list[tuple[str, type]] = [
     ("Catalog", CatalogScreen),
     ("Identity", IdentityScreen),
@@ -1635,5 +1943,8 @@ SCREENS: list[tuple[str, type]] = [
     ("CRM", CRMScreen),
     ("Flows", FlowsScreen),
     ("Skills", SkillsScreen),
+    ("Tube", TubeScreen),
+    ("Word bank", LexiconScreen),
+    ("AI helpers", AIScreen),
     ("Settings", SettingsScreen),
 ]

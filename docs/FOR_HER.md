@@ -57,6 +57,13 @@ phrases, pet names for fans, favorite emojis, how you open and close
 messages. The bot uses *your* words first when it drafts, so it sounds
 like you instead of a robot.
 
+**AI writing help:** connect Grok, Gemini, or Claude (with your own keys)
+and the app can draft captions, brainstorm video titles and content
+ideas, suggest hashtags, polish your writing, or suggest replies to fan
+messages. It's always a draft for you to approve — it never posts
+anything itself. There's a Words tab in the phone app for
+adding new ones whenever they come to you.
+
 ## 4. Spicy mode (the stuff you asked for)
 
 A separate chat mode for flirty/dirty talk, with levels you control:
@@ -120,7 +127,8 @@ nice page you can send fans.
   none of them allow auto-upload, so the app writes you a complete
   upload packet per video per site — a catchy title, a description with
   your links in it, auto-picked tags, and a checklist. You paste and
-  publish on each site from your verified account.
+  publish on each site from your verified account. There's a Tube tab
+  in the phone app for previewing titles and tags on the go.
 
 ## 9. Know your numbers
 

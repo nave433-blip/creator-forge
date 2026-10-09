@@ -114,6 +114,11 @@ local dashboard, a desktop app, or her phone.
 
 ## Quickstart
 
+**New here? Start with `forge menu`** -- the friendly interactive menu
+covers every feature without memorizing commands. Everything below is
+also clickable in the desktop app (`forge gui`), the web dashboard
+(`forge dashboard`), or the Android app.
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"

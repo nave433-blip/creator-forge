@@ -28,8 +28,46 @@ from forge.post.manual import build_posting_packet, export_content_calendar
 from forge.post.reddit import RedditPost, submit
 from forge.video.pipeline import ConsentGateError, generate_video
 
-app = typer.Typer(help="CreatorForge: AI creator-assistant toolkit.",
-                  no_args_is_help=True)
+
+class ForgeTyper(typer.Typer):
+    """Typer app that turns tracebacks into clean user-facing errors.
+
+    Domain errors (consent gates, missing files, bad values, unconfigured
+    backends) print as one-line messages. Anything unexpected also prints
+    cleanly; set FORGE_DEBUG=1 to get the full traceback for debugging.
+    """
+
+    def __call__(self, *args, **kwargs):
+        import os
+        import sys
+        try:
+            return super().__call__(*args, **kwargs)
+        except (typer.Exit, SystemExit, KeyboardInterrupt):
+            raise  # already-handled exits pass through untouched
+        except (InvalidConsentError, ConsentGateError) as e:
+            typer.echo(f"Refused: {e}", err=True)
+            sys.exit(2)
+        except FileNotFoundError as e:
+            typer.echo(f"Not found: {e.filename or e}", err=True)
+            sys.exit(1)
+        except PermissionError as e:
+            typer.echo(f"Permission denied: {e.filename or e}", err=True)
+            sys.exit(1)
+        except Exception as e:
+            if os.environ.get("FORGE_DEBUG") == "1":
+                raise
+            name = type(e).__name__
+            if isinstance(e, (KeyError, ValueError)) or \
+                    name.endswith("NotConfiguredError"):
+                msg = e.args[0] if e.args else e
+                typer.echo(f"Error: {msg}", err=True)
+            else:
+                typer.echo(f"Something went wrong: {e}", err=True)
+            sys.exit(1)
+
+
+app = ForgeTyper(help="CreatorForge: AI creator-assistant toolkit.",
+                 no_args_is_help=True)
 
 
 def _cfg(config: Optional[str]):
@@ -153,11 +191,7 @@ def video_generate(
 ):
     """Generate a video. REFUSES to run without a valid consent pack."""
     cfg = _cfg(config)
-    pack_path = pack or _resolve_pack(cfg)
-    if not pack_path:
-        raise typer.BadParameter("No identity pack: pass --pack, set an "
-                                 "active persona (`forge identity use`), or "
-                                 "set identity.pack_path in forge.yaml.")
+    pack_path = _resolve_pack(pack, cfg)
     try:
         result = generate_video(config=cfg, identity_pack_path=pack_path,
                                 prompt=prompt, negative_prompt=negative,
@@ -639,9 +673,7 @@ def persona_voice_clone(
     """Clone her voice via ElevenLabs (consent-gated, needs API key)."""
     from forge.persona.voice import ElevenLabsVoice
     cfg = _cfg(config)
-    pack_path = pack or _resolve_pack(cfg)
-    if not pack_path:
-        raise typer.BadParameter("No identity pack: pass --pack or configure it.")
+    pack_path = _resolve_pack(pack, cfg)
     voice = ElevenLabsVoice(key, cfg.get_path("persona.elevenlabs_key"))
     voice_id = voice.clone_voice(name=name, audio_files=audio,
                                  identity_pack_path=pack_path)
@@ -661,10 +693,8 @@ def persona_voice_speak(
     """Synthesize speech with her cloned voice (consent-gated)."""
     from forge.persona.voice import ElevenLabsVoice
     cfg = _cfg(config)
-    pack_path = pack or _resolve_pack(cfg)
+    pack_path = _resolve_pack(pack, cfg)
     vid = voice_id or cfg.get_path("persona.elevenlabs_voice_id")
-    if not pack_path:
-        raise typer.BadParameter("No identity pack: pass --pack or configure it.")
     if not vid:
         raise typer.BadParameter("No voice_id: clone first or set "
                                  "persona.elevenlabs_voice_id.")
@@ -690,10 +720,7 @@ def video_scene(
     from forge.video.pipeline import SceneRefused, generate_scene_video
     from forge.video.scenes import SceneRefusedError
     cfg = _cfg(config)
-    pack_path = pack or _resolve_pack(cfg)
-    if not pack_path:
-        raise typer.BadParameter("No identity pack: pass --pack, set an "
-                                 "active persona, or configure it.")
+    pack_path = _resolve_pack(pack, cfg)
     catalog_items = None
     try:
         store = CatalogStore(cfg.get_path("catalog.db_path",
@@ -1227,10 +1254,7 @@ def video_queue_add(
     """Queue a video generation to run later (consent still required)."""
     from forge.video.queue import VideoQueue
     cfg = _cfg(config)
-    pack_path = pack or _resolve_pack(cfg)
-    if not pack_path:
-        raise typer.BadParameter("No identity pack: pass --pack, set an "
-                                 "active persona, or configure it.")
+    pack_path = _resolve_pack(pack, cfg)
     q = VideoQueue(cfg.get_path("video.queue_db",
                                 "./forge-data/video-queue.db"))
     job = q.add(prompt=prompt, pack_path=pack_path, negative_prompt=negative,
@@ -1278,8 +1302,8 @@ def video_queue_list(
 
 
 # -- identity: multi-persona ---------------------------------------------------
-def _resolve_pack(cfg) -> Optional[str]:
-    """Active persona pack > identity.pack_path from config."""
+def _default_pack(cfg) -> Optional[str]:
+    """Active persona pack > identity.pack_path from config (may be None)."""
     from forge.identity.pack import resolve_pack_path
     return resolve_pack_path(
         None, cfg, cfg.get_path("data_dir", "./forge-data"))
@@ -1487,6 +1511,7 @@ def tube_metadata(
     scene: Optional[str] = typer.Option(None, "--scene", help="Scene YAML file."),
     name: str = typer.Option("", "--name", help="Her display name for titles."),
     tags: str = typer.Option("", "--tags", help="Comma-separated custom tags."),
+    template: int = typer.Option(0, "--template", help="Title template 0-3."),
     config: Optional[str] = typer.Option(None, "--config"),
 ):
     """Preview title/description/tags for one site (nothing is posted)."""
@@ -1505,11 +1530,15 @@ def tube_metadata(
     meta = generate_metadata(
         tube_site, scene_data, name=name,
         custom_tags=[t.strip() for t in tags.split(",") if t.strip()],
-        links=build_payment_links(cfg))
+        links=build_payment_links(cfg), template_idx=template)
     typer.echo(f"TITLE ({len(meta.title)} chars):\n  {meta.title}\n")
     typer.echo(f"DESCRIPTION:\n{meta.description}\n")
     typer.echo(f"TAGS ({len(meta.tags)}/{tube_site.max_tags}): "
                f"{', '.join(meta.tags)}")
+    if meta.tags_truncated:
+        typer.echo(f"NOTE: {tube_site.name} only takes {tube_site.max_tags} "
+                   f"tags -- weakest ones were dropped. Put your strongest "
+                   f"tags first in --tags.")
 
 
 @tube_app.command("packet")
@@ -1519,6 +1548,7 @@ def tube_packet(
     scene: Optional[str] = typer.Option(None, "--scene"),
     name: str = typer.Option("", "--name"),
     tags: str = typer.Option("", "--tags"),
+    template: int = typer.Option(0, "--template", help="Title template 0-3."),
     config: Optional[str] = typer.Option(None, "--config"),
 ):
     """Build an upload packet (title/description/tags/checklist) for one video."""
@@ -1538,7 +1568,7 @@ def tube_packet(
     dest = build_packet(
         video, tube_site, out, scene=scene_data, name=name,
         custom_tags=[t.strip() for t in tags.split(",") if t.strip()],
-        links=build_payment_links(cfg))
+        links=build_payment_links(cfg), template_idx=template)
     typer.echo(f"Packet ready at {dest}")
     typer.echo("Copy title/description/tags into the site's upload page, "
                "then publish there.")
@@ -1577,6 +1607,159 @@ def tube_bulk(
                "each one in the site's own dashboard.")
 
 
+# -- public AI providers (Grok / Gemini / Claude) --------------------------------
+ai_app = typer.Typer(help="Public AI helpers (her API keys; drafts only).",
+                     no_args_is_help=True)
+app.add_typer(ai_app, name="ai")
+
+
+def _ai_provider(provider: Optional[str], cfg):
+    from forge.ai.providers import resolve_provider
+    return resolve_provider(provider, cfg)
+
+
+@ai_app.command("providers")
+def ai_providers(config: Optional[str] = typer.Option(None, "--config")):
+    """Show AI providers and whether each has a key configured."""
+    from forge.ai.providers import provider_status
+    for p in provider_status(_cfg(config)):
+        mark = "ready" if p["configured"] else "no key"
+        typer.echo(f"{p['provider']:8} [{mark}] model={p['model']}")
+        if not p["configured"]:
+            typer.echo(f"         get a key: {p['docs']}")
+    typer.echo("\nSet keys in forge.yaml under ai: (or XAI_API_KEY / "
+               "GEMINI_API_KEY / ANTHROPIC_API_KEY).")
+
+
+@ai_app.command("ask")
+def ai_ask(
+    prompt: str = typer.Option(..., "--prompt"),
+    provider: Optional[str] = typer.Option(None, "--provider",
+                                           help="grok|gemini|claude"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Ask the AI anything. Prints the answer (draft, not sent anywhere)."""
+    from forge.ai.tasks import ask
+    resp = ask(_ai_provider(provider, _cfg(config)), prompt)
+    typer.echo(f"[{resp.provider}/{resp.model}]\n{resp.text}")
+
+
+@ai_app.command("caption")
+def ai_caption(
+    topic: str = typer.Option(...),
+    n: int = typer.Option(3, "--n"),
+    tone: str = typer.Option("playful", "--tone"),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Write social captions about a topic."""
+    from forge.ai.tasks import captions
+    resp = captions(_ai_provider(provider, _cfg(config)), topic, n, tone)
+    typer.echo(resp.text)
+
+
+@ai_app.command("titles")
+def ai_titles(
+    topic: str = typer.Option(...),
+    n: int = typer.Option(5, "--n"),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Brainstorm video titles."""
+    from forge.ai.tasks import titles
+    typer.echo(titles(_ai_provider(provider, _cfg(config)), topic, n).text)
+
+
+@ai_app.command("hashtags")
+def ai_hashtags(
+    topic: str = typer.Option(...),
+    n: int = typer.Option(10, "--n"),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Suggest hashtags for a topic."""
+    from forge.ai.tasks import hashtags
+    typer.echo(hashtags(_ai_provider(provider, _cfg(config)), topic, n).text)
+
+
+@ai_app.command("ideas")
+def ai_ideas(
+    niche: str = typer.Option(...),
+    n: int = typer.Option(10, "--n"),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Brainstorm video content ideas for her niche."""
+    from forge.ai.tasks import content_ideas
+    typer.echo(content_ideas(_ai_provider(provider, _cfg(config)),
+                             niche, n).text)
+
+
+@ai_app.command("scene-ideas")
+def ai_scene_ideas(
+    vibe: str = typer.Option(...),
+    n: int = typer.Option(5, "--n"),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Describe filmable AI-video scene concepts for a vibe."""
+    from forge.ai.tasks import scene_ideas
+    typer.echo(scene_ideas(_ai_provider(provider, _cfg(config)),
+                           vibe, n).text)
+
+
+@ai_app.command("polish")
+def ai_polish(
+    text: str = typer.Option(...),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Rewrite her draft punchier, keeping her voice."""
+    from forge.ai.tasks import polish
+    typer.echo(polish(_ai_provider(provider, _cfg(config)), text).text)
+
+
+@ai_app.command("reply-assist")
+def ai_reply_assist(
+    incoming: str = typer.Option(..., "--incoming",
+                                 help="The fan's message."),
+    context: str = typer.Option("", "--context"),
+    platform: Optional[str] = typer.Option(None, "--platform"),
+    sender: Optional[str] = typer.Option(None, "--sender"),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Draft reply options for a fan message.
+
+    With --platform and --sender, the draft goes into the approval queue;
+    otherwise it's just printed.
+    """
+    from forge.ai.tasks import reply_assist
+    cfg = _cfg(config)
+    resp = reply_assist(_ai_provider(provider, cfg), incoming, context)
+    if platform and sender:
+        engine = _load_engine(cfg)
+        draft = engine.queue.add(platform=platform, sender=sender,
+                                 incoming=incoming, reply=resp.text,
+                                 trigger="ai-assist")
+        _save_engine_queue(engine)
+        typer.echo(f"Draft #{draft.id} queued for approval:")
+    typer.echo(resp.text)
+
+
+@ai_app.command("promo")
+def ai_promo(
+    item: str = typer.Option(...),
+    price: str = typer.Option(...),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Write promo lines for a menu item at her price."""
+    from forge.ai.tasks import promo_text
+    typer.echo(promo_text(_ai_provider(provider, _cfg(config)),
+                          item, price).text)
+
+
 # -- dashboard ---------------------------------------------------------------
 @app.command()
 def dashboard(config: Optional[str] = typer.Option(None, "--config"),
@@ -1589,7 +1772,7 @@ def dashboard(config: Optional[str] = typer.Option(None, "--config"),
 
 @app.command()
 def gui(config: Optional[str] = typer.Option(None, "--config")):
-    """Launch the desktop GUI (needs `pip install "creator-forge[gui]"`)."""
+    """Launch the desktop GUI (needs `pip install "creator-forge\\[gui]"`)."""
     from forge.gui import launch
     raise SystemExit(launch(config))
 
