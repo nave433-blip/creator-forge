@@ -111,6 +111,7 @@ Privacy: no real names appear in this repo, including here.
 | Reddit API | Borrowed: PRAW | BSD-2 | Already in use |
 | Local AI drafts | Built from scratch (`forge/ai/local.py`) | — | Zero-dependency template engine was the right call; no OSS micro-lib needed. Ollama (MIT) noted above as the future upgrade path. |
 | Translator backend | Not vendored | AGPL-3.0 (LibreTranslate) | Flagged in §9 for his call per the GPL rule |
+| Promo-link tracking | Built from scratch (`forge/promo/tracker.py`) | — | Evaluated OSS: none worth borrowing — UTM tagging is `urllib.parse`, storage is sqlite; a micro-dependency would add risk for ~150 lines. |
 
 ## License hygiene
 - `pyproject.toml` pins third-party deps; their licenses ship with them.

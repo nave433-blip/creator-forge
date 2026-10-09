@@ -324,7 +324,9 @@ def _dash_client(tmp_path: Path):
     import forge.dashboard.app as dash_app
     from fastapi.testclient import TestClient
     from forge.config import ForgeConfig
-    dash_app.init_state(ForgeConfig({}), tmp_path / "dash.db")
+    dash_app.init_state(
+        ForgeConfig({"promo": {"db_path": str(tmp_path / "promo.db")}}),
+        tmp_path / "dash.db")
     return TestClient(dash_app.app), dash_app
 
 

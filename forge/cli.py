@@ -495,6 +495,92 @@ def pay_tip_menu(out: str = typer.Option("tip-menu.html", "--out"),
     typer.echo(f"Tip menu written to {out}")
 
 
+# -- promo links (affiliate / shoutout tracking) -------------------------------
+promo_app = typer.Typer(help="Promo-link tracking for shoutouts/collabs.",
+                        no_args_is_help=True)
+app.add_typer(promo_app, name="promo")
+
+
+def _promo_tracker(cfg):
+    from forge.promo.tracker import PromoTracker
+    return PromoTracker(cfg.get_path("promo.db_path", "./forge-data/promo.db"))
+
+
+@promo_app.command("link-create")
+def promo_link_create(
+    url: str = typer.Option(..., "--url", help="Base URL to tag."),
+    campaign: str = typer.Option(..., "--campaign",
+                                 help="Campaign name, e.g. summer-shoutout."),
+    source: str = typer.Option("", "--source",
+                               help="utm_source (who's posting it)."),
+    medium: str = typer.Option("shoutout", "--medium"),
+    notes: str = typer.Option("", "--notes"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Generate a UTM-tagged promo link for a campaign.
+
+    Honest scope: the tagged URL lets the platform's own analytics
+    attribute traffic. Clicks can't be seen from here -- log resulting
+    earnings with `promo log-earning` from the platform's payout reports.
+    """
+    tracker = _promo_tracker(_cfg(config))
+    try:
+        row = tracker.create_link(url, campaign, source=source,
+                                  medium=medium, notes=notes)
+    finally:
+        tracker.close()
+    typer.echo(f"Code: {row['code']}")
+    typer.echo(f"URL:  {row['full_url']}")
+
+
+@promo_app.command("link-list")
+def promo_link_list(
+    campaign: Optional[str] = typer.Option(None, "--campaign"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """List tracked promo links (optionally one campaign)."""
+    tracker = _promo_tracker(_cfg(config))
+    try:
+        for row in tracker.list_links(campaign=campaign):
+            typer.echo(f"[{row['code']}] {row['campaign']} "
+                       f"src={row['source'] or '-'} {row['full_url']}")
+    finally:
+        tracker.close()
+
+
+@promo_app.command("log-earning")
+def promo_log_earning(
+    code: str = typer.Option(..., "--code", help="Link code from link-list."),
+    amount: float = typer.Option(..., "--amount"),
+    note: str = typer.Option("", "--note"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Attribute earnings to a promo link (manual entry from the platform's
+    payout reports -- the only honest source)."""
+    tracker = _promo_tracker(_cfg(config))
+    try:
+        tracker.log_earning(code, amount, note=note)
+    finally:
+        tracker.close()
+    typer.echo(f"Logged ${amount:.2f} to {code.upper()}.")
+
+
+@promo_app.command("report")
+def promo_report(config: Optional[str] = typer.Option(None, "--config")):
+    """Per-campaign totals: links tracked and earnings attributed."""
+    tracker = _promo_tracker(_cfg(config))
+    try:
+        rows = tracker.report()
+    finally:
+        tracker.close()
+    if not rows:
+        typer.echo("No promo links yet. Create one with `promo link-create`.")
+        return
+    for r in rows:
+        typer.echo(f"{r['campaign']}: {r['links']} link(s), "
+                   f"${r['earnings']:.2f} attributed")
+
+
 # -- vault -----------------------------------------------------------------
 vault_app = typer.Typer(help="Encrypted vault commands.", no_args_is_help=True)
 app.add_typer(vault_app, name="vault")

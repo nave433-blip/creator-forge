@@ -69,10 +69,18 @@ def _config() -> ForgeConfig:
     return _state["config"]
 
 
+def _promo():
+    from forge.promo.tracker import PromoTracker
+    return _state["promo"]
+
+
 def init_state(config: ForgeConfig, db_path: str | Path,
                persona_config: dict[str, Any] | None = None) -> None:
+    from forge.promo.tracker import PromoTracker
     _state["config"] = config
     _state["store"] = CatalogStore(db_path)
+    _state["promo"] = PromoTracker(
+        config.get_path("promo.db_path", "./forge-data/promo.db"))
     pdata = persona_config or config.get_path("persona", {}) or {}
     _state["engine"] = RuleEngine(
         Persona.from_dict(pdata),
@@ -201,6 +209,19 @@ def pay_page() -> str:
 def pay_links_json(_: None = Depends(_require_token)) -> JSONResponse:
     """Payment links as JSON (used by the mobile thin client)."""
     return JSONResponse({"links": build_payment_links(_config())})
+
+
+@app.get("/promo/links")
+def promo_links_json(campaign: str | None = None,
+                     _: None = Depends(_require_token)) -> JSONResponse:
+    """Tracked promo links (used by the mobile thin client)."""
+    return JSONResponse({"links": _promo().list_links(campaign=campaign)})
+
+
+@app.get("/promo/report")
+def promo_report_json(_: None = Depends(_require_token)) -> JSONResponse:
+    """Per-campaign promo earnings report."""
+    return JSONResponse({"campaigns": _promo().report()})
 
 
 @app.get("/post/packets")

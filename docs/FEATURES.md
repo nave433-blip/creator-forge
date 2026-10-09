@@ -282,6 +282,17 @@ are **always manual-assist** (copy/paste checklist) — no messaging API
 exists and automating risks her account. Dry-run by default; optional
 scheduler reminder (never auto-sends).
 
+## Promo-link tracking (affiliate / shoutouts)
+
+`forge promo link-create --url ... --campaign summer-shoutout` generates
+a UTM-tagged link (existing query params preserved) with a short
+reference code. `promo link-list`, `promo log-earning --code X --amount
+42.50` (manual entry from the platform's payout reports -- the only
+honest source; clicks can't be seen from a self-hosted tool), and
+`promo report` shows per-campaign link counts and attributed earnings so
+she knows which shoutouts paid off. Also on the dashboard
+(`/promo/links`, `/promo/report`) for the phone app.
+
 ## PPV upsell triggers (new)
 
 `forge chat ppv` watches for buying intent ("how much", "ppv", ...) and
