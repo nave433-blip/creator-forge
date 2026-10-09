@@ -78,14 +78,22 @@ def _cfg(config: Optional[str]):
 def init(path: str = typer.Argument(".", help="Project folder to set up.")):
     """Create a fresh CreatorForge project folder with example config."""
     import shutil
+    from importlib.resources import files as _res_files, as_file as _res_as_file
     dest = Path(path)
     dest.mkdir(parents=True, exist_ok=True)
-    here = Path(__file__).resolve().parent.parent
+    examples = _res_files("forge") / "examples"
+    copied = 0
     for name in ("forge.yaml", "identity-pack.example.yaml",
                  "persona.example.yaml"):
-        src = here / "examples" / name
-        if src.is_file():
-            shutil.copy2(src, dest / name.replace(".example", ""))
+        src = examples / name
+        # as_file ensures we get a real path even from zipped installs
+        with _res_as_file(src) as src_path:
+            if Path(src_path).is_file():
+                shutil.copy2(src_path, dest / name.replace(".example", ""))
+                copied += 1
+    if copied == 0:
+        typer.echo("WARNING: example configs not found in the installed "
+                   "package; project folder created empty.", err=True)
     typer.echo(f"Initialized CreatorForge project at {dest.resolve()}")
     typer.echo("Next: edit forge.yaml, then run `forge identity validate`.")
 

@@ -15,3 +15,5 @@ inbox.jsonl
 .DS_Store
 *.tgz
 *.zip
+build/
+*.egg-info/

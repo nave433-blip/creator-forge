@@ -21,7 +21,7 @@ from typing import Any
 
 @dataclass
 class Persona:
-    """Voice config for the bot. Loaded from examples/persona.example.yaml."""
+    """Voice config for the bot. Loaded from forge/examples/persona.example.yaml."""
     name: str = "assistant"
     tone: str = "friendly, playful, professional"
     boundaries: list[str] = field(default_factory=list)

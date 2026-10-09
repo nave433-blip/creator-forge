@@ -7,7 +7,7 @@ Looks for ``forge.yaml`` in (in order):
 4. ``~/.config/creator-forge/forge.yaml``.
 
 Individual values can be overridden with environment variables prefixed
-``FORGE_`` (e.g. ``FORGE_REDDIT_CLIENT_ID``). See examples/forge.yaml.
+``FORGE_`` (e.g. ``FORGE_REDDIT_CLIENT_ID``). See forge/examples/forge.yaml.
 """
 
 from __future__ import annotations

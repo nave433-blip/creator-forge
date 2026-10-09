@@ -154,13 +154,13 @@ creator-forge/
     connect/        # platform connector registry
     vault/          # AES-256-GCM encrypted store + backup bundles
     skills/         # auto-discovered plugins (watermark, aspect, promptlib)
+    examples/       # forge.yaml, identity pack, persona, scene templates
     analytics/      # earnings + post stats, plain-English reports
     gui/            # PySide6 desktop app (optional)
     dashboard/      # FastAPI local UI (+ PWA assets)
   mobile/           # Expo React Native Android thin client
   assets/           # app icon (CF monogram) + Linux .desktop launcher
   scripts/          # train_lora.sh (GPU training wrapper)
-  examples/         # forge.yaml, identity pack, persona, scene templates
   tests/            # smoke + feature tests (pytest)
   docs/             # honest guides
 ```

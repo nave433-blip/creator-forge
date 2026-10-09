@@ -15,7 +15,6 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
 COPY pyproject.toml README.md ./
 COPY forge/ ./forge/
 COPY scripts/ ./scripts/
-COPY examples/ ./examples/
 COPY docs/ ./docs/
 COPY assets/ ./assets/
 

@@ -181,3 +181,17 @@ def test_chat_boundary_fallback():
     draft = engine.handle_message(platform="manual", sender="fan1",
                                   text="can we meet in person?")
     assert draft.trigger == "boundary-fallback"
+
+
+def test_init_scaffolds_example_configs(tmp_path):
+    """Regression: `forge init` must copy example configs into the new
+    project folder (they ship inside the installed package)."""
+    from forge.cli import app
+    runner = CliRunner()
+    target = tmp_path / "my-project"
+    result = runner.invoke(app, ["init", str(target)])
+    assert result.exit_code == 0, result.output
+    for name in ("forge.yaml", "identity-pack.yaml", "persona.yaml"):
+        p = target / name
+        assert p.is_file(), f"{name} was not scaffolded by forge init"
+        assert p.stat().st_size > 0, f"{name} scaffolded empty"

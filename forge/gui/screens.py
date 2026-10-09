@@ -602,7 +602,7 @@ class PayScreen(_Base):
             self.table_holder.addWidget(lbl)
         if not rows:
             lbl = QLabel("No payment handles configured yet -- see "
-                         "examples/forge.yaml.")
+                         "forge/examples/forge.yaml.")
             lbl.setObjectName("Dim")
             self.table_holder.addWidget(lbl)
 
