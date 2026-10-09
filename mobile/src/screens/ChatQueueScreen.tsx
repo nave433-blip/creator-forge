@@ -67,6 +67,11 @@ export default function ChatQueueScreen() {
             <Text style={{ color: C.dim, fontSize: 12 }}>
               #{item.id} · {item.platform} · from {item.sender} · trigger: {item.trigger}
             </Text>
+            {item.escalated && (
+              <Text style={{ color: C.warn, fontWeight: '700', marginTop: 4 }}>
+                ⚠ Needs your eyes: {item.escalation_categories.join(', ')}
+              </Text>
+            )}
             <Text style={{ color: C.text, marginTop: 6 }}>In: {item.incoming}</Text>
             <Text style={{ color: C.text, marginTop: 6, fontWeight: '600' }}>
               Draft: {item.reply}

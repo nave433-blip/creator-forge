@@ -8,15 +8,37 @@ import IdentityScreen from './src/screens/IdentityScreen';
 import ChatQueueScreen from './src/screens/ChatQueueScreen';
 import PayScreen from './src/screens/PayScreen';
 import PacketsScreen from './src/screens/PacketsScreen';
+import ScheduleScreen from './src/screens/ScheduleScreen';
+import AnalyticsScreen from './src/screens/AnalyticsScreen';
+import TemplatesScreen from './src/screens/TemplatesScreen';
+import TriageScreen from './src/screens/TriageScreen';
+import SpicyScreen from './src/screens/SpicyScreen';
+import OrdersScreen from './src/screens/OrdersScreen';
+import LiveScreen from './src/screens/LiveScreen';
+import CRMScreen from './src/screens/CRMScreen';
+import StreamScreen from './src/screens/StreamScreen';
+import FlowsScreen from './src/screens/FlowsScreen';
+import IdeasScreen from './src/screens/IdeasScreen';
 
-type Tab = 'catalog' | 'identity' | 'chat' | 'pay' | 'packets' | 'setup';
+type Tab = 'catalog' | 'identity' | 'chat' | 'pay' | 'packets' | 'schedule' | 'analytics' | 'templates' | 'triage' | 'spicy' | 'orders' | 'live' | 'crm' | 'stream' | 'flows' | 'ideas' | 'setup';
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'catalog', label: 'Catalog' },
-  { key: 'identity', label: 'Consent' },
   { key: 'chat', label: 'Chat' },
-  { key: 'pay', label: 'Pay' },
+  { key: 'triage', label: 'Triage' },
+  { key: 'spicy', label: 'Spicy' },
+  { key: 'orders', label: 'Orders' },
+  { key: 'live', label: 'Live' },
+  { key: 'crm', label: 'CRM' },
+  { key: 'stream', label: 'Stream' },
+  { key: 'flows', label: 'Flows' },
+  { key: 'ideas', label: 'Ideas' },
+  { key: 'schedule', label: 'Schedule' },
+  { key: 'templates', label: 'Replies' },
+  { key: 'analytics', label: 'Stats' },
+  { key: 'catalog', label: 'Catalog' },
   { key: 'packets', label: 'Packets' },
+  { key: 'pay', label: 'Pay' },
+  { key: 'identity', label: 'Consent' },
   { key: 'setup', label: 'Setup' },
 ];
 
@@ -39,6 +61,28 @@ function Shell() {
           <IdentityScreen />
         ) : tab === 'chat' ? (
           <ChatQueueScreen />
+        ) : tab === 'triage' ? (
+          <TriageScreen />
+        ) : tab === 'spicy' ? (
+          <SpicyScreen />
+        ) : tab === 'orders' ? (
+          <OrdersScreen />
+        ) : tab === 'live' ? (
+          <LiveScreen />
+        ) : tab === 'crm' ? (
+          <CRMScreen />
+        ) : tab === 'stream' ? (
+          <StreamScreen />
+        ) : tab === 'flows' ? (
+          <FlowsScreen />
+        ) : tab === 'ideas' ? (
+          <IdeasScreen />
+        ) : tab === 'schedule' ? (
+          <ScheduleScreen />
+        ) : tab === 'templates' ? (
+          <TemplatesScreen />
+        ) : tab === 'analytics' ? (
+          <AnalyticsScreen />
         ) : tab === 'pay' ? (
           <PayScreen />
         ) : tab === 'packets' ? (

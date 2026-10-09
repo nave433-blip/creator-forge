@@ -32,7 +32,63 @@ forge catalog scan /path/to/her/photos --tags "original"
 # 5. Start the dashboard
 forge dashboard
 # open http://127.0.0.1:8765
+
+# ...or the interactive menu (no flags to memorize)
+forge menu
 ```
+
+## Desktop app (Linux, optional)
+
+```bash
+pip install -e ".[gui]"   # adds PySide6
+forge gui
+```
+
+The GUI is iOS-glass styled and covers every area: catalog, identity,
+video, persona, chat approvals, posting, schedule, pay, vault,
+connectors, analytics, skills, settings. Without PySide6, `forge gui`
+just prints the install hint -- nothing else breaks.
+
+### Add it to your app launcher
+
+```bash
+# 1. Copy the .desktop file
+cp assets/creator-forge.desktop ~/.local/share/applications/
+
+# 2. Install the icon (pick one; 256px is a good default)
+mkdir -p ~/.local/share/icons
+cp assets/icons/icon-256.png ~/.local/share/icons/creatorforge.png
+#    ^ the .desktop file's Icon=creatorforge resolves to this name
+
+# 3. Make sure `forge` is on your PATH (e.g. pipx or the venv's bin),
+#    then refresh the launcher
+update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
+```
+
+The `.desktop` file runs `forge gui`, so `forge` must be importable
+from a normal login shell. If you installed with `pip install -e` into
+a venv, either put that venv's bin dir on PATH or install with
+`pipx install -e .` instead.
+
+## Restore from a backup
+
+`forge vault backup` writes one encrypted file. To restore on the same
+or a new machine:
+
+```bash
+forge vault restore --backup forge-backup.enc --dest ./forge-restore
+# then copy into place:
+cp -r ./forge-restore/vault/*    /path/to/your/vault/
+cp ./forge-restore/data/*.db     ./forge-data/
+cp ./forge-restore/data/*.json   ./forge-data/
+cp ./forge-restore/settings/forge.yaml ./forge.yaml   # review first!
+forge vault unlock   # confirm the password works
+forge identity validate
+```
+
+Moving to a new machine without the vault? Use the lighter
+`forge export-profile` / `forge import-profile` pair instead (settings
++ persona + packs + templates, no secrets).
 
 ## Configuration
 

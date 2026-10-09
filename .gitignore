@@ -8,6 +8,8 @@ mobile/.expo/
 *.db
 *.sqlite3
 forge.yaml
+forge-data/
+inbox.jsonl
 .vault-session
 .vault/
 .DS_Store

@@ -153,10 +153,11 @@ def video_generate(
 ):
     """Generate a video. REFUSES to run without a valid consent pack."""
     cfg = _cfg(config)
-    pack_path = pack or cfg.get_path("identity.pack_path")
+    pack_path = pack or _resolve_pack(cfg)
     if not pack_path:
-        raise typer.BadParameter("No identity pack: pass --pack or set "
-                                 "identity.pack_path in forge.yaml.")
+        raise typer.BadParameter("No identity pack: pass --pack, set an "
+                                 "active persona (`forge identity use`), or "
+                                 "set identity.pack_path in forge.yaml.")
     try:
         result = generate_video(config=cfg, identity_pack_path=pack_path,
                                 prompt=prompt, negative_prompt=negative,
@@ -265,8 +266,13 @@ def _load_engine(cfg) -> RuleEngine:
         with open(persona_path, encoding="utf-8") as fh:
             pdata = yaml.safe_load(fh) or {}
     triggers = [Trigger(**t) for t in pdata.get("triggers", [])]
+    from forge.chat.engine import build_tip_menu_trigger
+    tip_trigger = build_tip_menu_trigger(cfg)
+    if tip_trigger is not None:
+        triggers.append(tip_trigger)
     engine = RuleEngine(Persona.from_dict(pdata.get("persona", pdata)),
                         triggers)
+    engine.escalation_config = cfg
     modes_path = cfg.get_path("chat.modes_path", "./forge-data/chat-modes.json")
     engine.load_modes(modes_path)
     engine.modes_path = modes_path  # type: ignore[attr-defined]
@@ -633,7 +639,7 @@ def persona_voice_clone(
     """Clone her voice via ElevenLabs (consent-gated, needs API key)."""
     from forge.persona.voice import ElevenLabsVoice
     cfg = _cfg(config)
-    pack_path = pack or cfg.get_path("identity.pack_path")
+    pack_path = pack or _resolve_pack(cfg)
     if not pack_path:
         raise typer.BadParameter("No identity pack: pass --pack or configure it.")
     voice = ElevenLabsVoice(key, cfg.get_path("persona.elevenlabs_key"))
@@ -655,7 +661,7 @@ def persona_voice_speak(
     """Synthesize speech with her cloned voice (consent-gated)."""
     from forge.persona.voice import ElevenLabsVoice
     cfg = _cfg(config)
-    pack_path = pack or cfg.get_path("identity.pack_path")
+    pack_path = pack or _resolve_pack(cfg)
     vid = voice_id or cfg.get_path("persona.elevenlabs_voice_id")
     if not pack_path:
         raise typer.BadParameter("No identity pack: pass --pack or configure it.")
@@ -684,9 +690,10 @@ def video_scene(
     from forge.video.pipeline import SceneRefused, generate_scene_video
     from forge.video.scenes import SceneRefusedError
     cfg = _cfg(config)
-    pack_path = pack or cfg.get_path("identity.pack_path")
+    pack_path = pack or _resolve_pack(cfg)
     if not pack_path:
-        raise typer.BadParameter("No identity pack: pass --pack or configure it.")
+        raise typer.BadParameter("No identity pack: pass --pack, set an "
+                                 "active persona, or configure it.")
     catalog_items = None
     try:
         store = CatalogStore(cfg.get_path("catalog.db_path",
@@ -705,6 +712,612 @@ def video_scene(
     typer.echo(yaml.safe_dump(result, sort_keys=False))
 
 
+# -- menu ------------------------------------------------------------------
+@app.command()
+def menu():
+    """Interactive numbered menu over every command (beginner-friendly)."""
+    from forge.menu import run_menu
+    run_menu()
+
+
+# -- skills ----------------------------------------------------------------
+skills_app = typer.Typer(help="Plugin/skill commands.", no_args_is_help=True)
+app.add_typer(skills_app, name="skills")
+
+
+@skills_app.command("list")
+def skills_list(config: Optional[str] = typer.Option(None, "--config")):
+    """List installed skills (built-in + skills.paths in forge.yaml)."""
+    from forge.skills import discover_skills
+    skills = discover_skills(_cfg(config))
+    if not skills:
+        typer.echo("No skills found.")
+        return
+    for name in sorted(skills):
+        s = skills[name]
+        typer.echo(f"- {s.name} v{s.version}: {s.description}")
+        if s.usage:
+            typer.echo(f"    {s.usage}")
+
+
+@skills_app.command("run")
+def skills_run(name: str = typer.Argument(..., help="Skill name."),
+               args: list[str] = typer.Argument(
+                   None, help="Extra args passed to the skill."),
+               config: Optional[str] = typer.Option(None, "--config")):
+    """Run a skill: forge skills run watermark --text @her in.png out.png"""
+    from forge.skills import SkillError, run_skill
+    try:
+        typer.echo(run_skill(name, list(args or []), _cfg(config)))
+    except SkillError as e:
+        typer.echo(f"Skill failed: {e}", err=True)
+        raise typer.Exit(1)
+
+
+# -- post: scheduler ---------------------------------------------------------
+@post_app.command("schedule")
+def post_schedule_cmd(
+    platform: str = typer.Option(...),
+    media: str = typer.Option(...),
+    caption: str = typer.Option(...),
+    when: str = typer.Option(..., "--when",
+                             help="ISO-8601, e.g. 2026-10-10T19:00"),
+    title: str = typer.Option(""),
+    hashtags: str = typer.Option(""),
+    notes: str = typer.Option(""),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Build a manual posting packet AND schedule it for later.
+
+    Reminder: Snapchat/OnlyFans/TikTok have no posting API -- scheduling
+    means "remind me", not "post for me". See what's due with
+    `forge post due`.
+    """
+    from forge.post.schedule import Scheduler
+    cfg = _cfg(config)
+    out = cfg.get_path("post.packets_dir", "./forge-data/packets")
+    packet_dir = build_posting_packet(
+        platform=platform, media_path=media, caption=caption,
+        hashtags=[h.strip() for h in hashtags.split() if h.strip()],
+        out_dir=out, title=title, scheduled_for=when)
+    sched = Scheduler(cfg.get_path("post.schedule_db",
+                                   "./forge-data/schedule.db"))
+    row = sched.schedule_packet(platform=platform, packet_dir=packet_dir,
+                                scheduled_for=when, title=title, notes=notes)
+    sched.close()
+    typer.echo(f"Packet ready at {packet_dir}")
+    typer.echo(f"Scheduled #{row['id']} for {row['scheduled_for']} "
+               f"(status: {row['status']}).")
+    typer.echo("This is a REMINDER, not auto-posting -- post it yourself "
+               "in the app when it's due.")
+
+
+@post_app.command("due")
+def post_due_cmd(config: Optional[str] = typer.Option(None, "--config")):
+    """Show scheduled posts whose time has come (post them manually)."""
+    from forge.post.schedule import Scheduler
+    cfg = _cfg(config)
+    sched = Scheduler(cfg.get_path("post.schedule_db",
+                                   "./forge-data/schedule.db"))
+    due = sched.due()
+    sched.close()
+    if not due:
+        typer.echo("Nothing due right now. Upcoming:")
+        sched2 = Scheduler(cfg.get_path("post.schedule_db",
+                                        "./forge-data/schedule.db"))
+        for r in sched2.upcoming(limit=5):
+            typer.echo(f"  #{r['id']} {r['scheduled_for']} [{r['platform']}] "
+                       f"{r['title']}")
+        sched2.close()
+        return
+    typer.echo("DUE NOW -- post these in the apps, then mark done:")
+    for r in due:
+        typer.echo(f"  #{r['id']} [{r['platform']}] {r['title'] or '(no title)'}")
+        typer.echo(f"      packet: {r['packet_dir']}")
+
+
+@post_app.command("scheduled")
+def post_scheduled_cmd(
+    status: Optional[str] = typer.Option(None, "--status",
+                                         help="scheduled | done | skipped"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """List scheduled posts (optionally filtered by status)."""
+    from forge.post.schedule import Scheduler
+    cfg = _cfg(config)
+    sched = Scheduler(cfg.get_path("post.schedule_db",
+                                   "./forge-data/schedule.db"))
+    rows = sched.list(status=status)
+    sched.close()
+    if not rows:
+        typer.echo("No scheduled posts.")
+        return
+    for r in rows:
+        typer.echo(f"#{r['id']} {r['scheduled_for']} [{r['platform']}] "
+                   f"{r['title'] or '(no title)'} -- {r['status']}")
+
+
+@post_app.command("mark-done")
+def post_mark_done_cmd(
+    post_id: int = typer.Argument(...),
+    status: str = typer.Option("done", "--status",
+                               help="done | skipped | scheduled"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Mark a scheduled post done (or skipped)."""
+    from forge.post.schedule import Scheduler
+    cfg = _cfg(config)
+    sched = Scheduler(cfg.get_path("post.schedule_db",
+                                   "./forge-data/schedule.db"))
+    try:
+        row = sched.mark(post_id, status)
+    except (KeyError, ValueError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    finally:
+        sched.close()
+    typer.echo(f"#{row['id']} marked {row['status']}.")
+
+
+# -- analytics ---------------------------------------------------------------
+analytics_app = typer.Typer(help="Stats & earnings commands.",
+                            no_args_is_help=True)
+app.add_typer(analytics_app, name="analytics")
+
+
+def _analytics_store(cfg):
+    from forge.analytics.store import AnalyticsStore
+    return AnalyticsStore(cfg.get_path("analytics.db_path",
+                                       "./forge-data/analytics.db"))
+
+
+@analytics_app.command("log-post")
+def analytics_log_post(
+    platform: str = typer.Option(...),
+    post_ref: str = typer.Option(..., "--post-ref",
+                                 help="Post id or URL."),
+    title: str = typer.Option(""),
+    views: int = typer.Option(0),
+    likes: int = typer.Option(0),
+    comments: int = typer.Option(0),
+    earnings: float = typer.Option(0.0),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Manually log stats for one post (OnlyFans/Fansly/etc have no API)."""
+    store = _analytics_store(_cfg(config))
+    row = store.log_post_stat(platform=platform, post_ref=post_ref,
+                              title=title, views=views, likes=likes,
+                              comments=comments, earnings=earnings)
+    store.close()
+    typer.echo(f"Logged stats for [{platform}] {post_ref} (id {row['id']}).")
+
+
+@analytics_app.command("log-earning")
+def analytics_log_earning(
+    platform: str = typer.Option(...),
+    amount: float = typer.Option(...),
+    kind: str = typer.Option("", help="subs | tips | ppv | custom | ..."),
+    month: str = typer.Option("", help="YYYY-MM, blank = this month."),
+    currency: str = typer.Option("USD"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Log money earned on a platform."""
+    store = _analytics_store(_cfg(config))
+    row = store.log_earning(platform=platform, amount=amount, kind=kind,
+                            month=month, currency=currency)
+    store.close()
+    typer.echo(f"Logged {currency} {amount:.2f} on {platform} "
+               f"for {row['month']} ({kind or 'unspecified'}).")
+
+
+@analytics_app.command("import-earnings")
+def analytics_import_earnings(
+    csv_path: str = typer.Argument(...),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Import earnings from CSV (platform,amount[,currency,kind,month])."""
+    store = _analytics_store(_cfg(config))
+    try:
+        n = store.import_earnings_csv(csv_path)
+    finally:
+        store.close()
+    typer.echo(f"Imported {n} earning row(s) from {csv_path}.")
+
+
+@analytics_app.command("report")
+def analytics_report(config: Optional[str] = typer.Option(None, "--config")):
+    """Print a plain-English analytics summary."""
+    from forge.analytics.report import build_report
+    store = _analytics_store(_cfg(config))
+    try:
+        typer.echo(build_report(store))
+    finally:
+        store.close()
+
+
+@analytics_app.command("reddit-stats")
+def analytics_reddit_stats(
+    submission_id: str = typer.Argument(...),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Fetch LIVE stats for a Reddit submission (official API)."""
+    from forge.analytics.store import reddit_submission_stats
+    from forge.post.reddit import RedditNotConfiguredError
+    cfg = _cfg(config)
+    try:
+        stats = reddit_submission_stats(cfg, submission_id)
+    except RedditNotConfiguredError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(yaml.safe_dump(stats, sort_keys=False))
+    # also store it locally for the report
+    store = _analytics_store(cfg)
+    try:
+        store.log_post_stat(platform="reddit", post_ref=submission_id,
+                            title=stats["title"],
+                            likes=stats["score"],
+                            comments=stats["num_comments"],
+                            views=stats["views"] or 0)
+    finally:
+        store.close()
+    typer.echo("Saved into local stats.")
+
+
+# -- chat: templates, reject, worker-once --------------------------------------
+@chat_app.command("reject")
+def chat_reject_cmd(draft_id: int = typer.Argument(...),
+                    config: Optional[str] = typer.Option(None, "--config")):
+    """Reject a pending draft."""
+    engine = _load_engine(_cfg(config))
+    try:
+        d = engine.queue.reject(draft_id)
+    except (KeyError, ValueError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    _save_engine_queue(engine)
+    typer.echo(f"Draft #{d.id} rejected.")
+
+
+@chat_app.command("worker-once")
+def chat_worker_once(
+    inbox: str = typer.Option("inbox.jsonl", "--inbox"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Single worker pass over the manual inbox (drafts into the queue)."""
+    from forge.chat.worker import PollingWorker, get_adapter
+    engine = _load_engine(_cfg(config))
+    worker = PollingWorker(engine, get_adapter("manual-inbox",
+                                               inbox_path=inbox))
+    drafts = worker.run_once()
+    _save_engine_queue(engine)
+    typer.echo(f"Processed {len(drafts)} message(s).")
+    for d in drafts:
+        flag = " [ESCALATED: " + ",".join(d.escalation_categories) + "]" \
+            if d.escalated else ""
+        typer.echo(f"  #{d.id} ({d.platform}/{d.sender}){flag}: {d.reply[:80]}")
+
+
+@chat_app.command("template-add")
+def chat_template_add(
+    name: str = typer.Option(...),
+    text: str = typer.Option(...),
+    category: str = typer.Option("general"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Save a canned response template. {sender} = their name."""
+    from forge.chat.templates import add_template, ensure_defaults
+    ensure_defaults()
+    try:
+        add_template(name, text, category)
+    except KeyError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Template '{name}' saved.")
+
+
+@chat_app.command("template-list")
+def chat_template_list(config: Optional[str] = typer.Option(None, "--config")):
+    """List canned response templates."""
+    from forge.chat.templates import ensure_defaults, load_templates
+    ensure_defaults()
+    templates = load_templates()
+    if not templates:
+        typer.echo("No templates.")
+        return
+    for name in sorted(templates):
+        t = templates[name]
+        typer.echo(f"- {name} [{t.get('category', 'general')}]: "
+                   f"{t['text'][:70]}")
+
+
+@chat_app.command("template-use")
+def chat_template_use(
+    name: str = typer.Option(...),
+    platform: str = typer.Option(...),
+    sender: str = typer.Option(...),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Draft a canned template into the approval queue."""
+    from forge.chat.templates import ensure_defaults, render_template
+    ensure_defaults()
+    cfg = _cfg(config)
+    engine = _load_engine(cfg)
+    try:
+        text = render_template(name, sender=sender,
+                               persona_name=engine.persona.name)
+    except KeyError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    draft = engine.queue.add(platform=platform, sender=sender,
+                             incoming=f"(template: {name})", reply=text,
+                             trigger=f"template:{name}")
+    _save_engine_queue(engine)
+    typer.echo(f"Draft #{draft.id} queued from template '{name}':")
+    typer.echo(f"  {text}")
+
+
+@chat_app.command("template-delete")
+def chat_template_delete(
+    name: str = typer.Option(...),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Delete a canned response template."""
+    from forge.chat.templates import delete_template
+    try:
+        delete_template(name)
+    except KeyError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Template '{name}' deleted.")
+
+
+# -- video: batch queue --------------------------------------------------------
+@video_app.command("queue-add")
+def video_queue_add(
+    prompt: str = typer.Option(..., "--prompt"),
+    pack: Optional[str] = typer.Option(None, "--pack"),
+    adapter: str = typer.Option("", "--adapter"),
+    duration: int = typer.Option(5, "--duration"),
+    negative: str = typer.Option("", "--negative"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Queue a video generation to run later (consent still required)."""
+    from forge.video.queue import VideoQueue
+    cfg = _cfg(config)
+    pack_path = pack or _resolve_pack(cfg)
+    if not pack_path:
+        raise typer.BadParameter("No identity pack: pass --pack, set an "
+                                 "active persona, or configure it.")
+    q = VideoQueue(cfg.get_path("video.queue_db",
+                                "./forge-data/video-queue.db"))
+    job = q.add(prompt=prompt, pack_path=pack_path, negative_prompt=negative,
+                adapter=adapter, duration_s=duration)
+    q.close()
+    typer.echo(f"Queued job #{job['id']}. Run with: forge video queue-run")
+
+
+@video_app.command("queue-run")
+def video_queue_run(config: Optional[str] = typer.Option(None, "--config")):
+    """Run all queued video jobs sequentially (consent-gated each)."""
+    from forge.video.queue import VideoQueue
+    cfg = _cfg(config)
+    q = VideoQueue(cfg.get_path("video.queue_db",
+                                "./forge-data/video-queue.db"))
+    jobs = q.run_all(cfg)
+    q.close()
+    if not jobs:
+        typer.echo("Queue is empty.")
+        return
+    for j in jobs:
+        if j["status"] == "done":
+            typer.echo(f"#{j['id']} done: {', '.join(j['outputs'])}")
+        else:
+            typer.echo(f"#{j['id']} FAILED: {j['error']}")
+
+
+@video_app.command("queue-list")
+def video_queue_list(
+    status: Optional[str] = typer.Option(None, "--status"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """List video queue jobs."""
+    from forge.video.queue import VideoQueue
+    cfg = _cfg(config)
+    q = VideoQueue(cfg.get_path("video.queue_db",
+                                "./forge-data/video-queue.db"))
+    jobs = q.list(status=status)
+    q.close()
+    if not jobs:
+        typer.echo("No jobs.")
+        return
+    for j in jobs:
+        typer.echo(f"#{j['id']} [{j['status']}] {j['prompt'][:60]}")
+
+
+# -- identity: multi-persona ---------------------------------------------------
+def _resolve_pack(cfg) -> Optional[str]:
+    """Active persona pack > identity.pack_path from config."""
+    from forge.identity.pack import resolve_pack_path
+    return resolve_pack_path(
+        None, cfg, cfg.get_path("data_dir", "./forge-data"))
+
+
+@identity_app.command("list")
+def identity_list_cmd(config: Optional[str] = typer.Option(None, "--config")):
+    """List persona packs (multi-persona) and which is active."""
+    from forge.identity.pack import get_active_pack, list_packs
+    cfg = _cfg(config)
+    packs_dir = cfg.get_path("identity.packs_dir", "./identity-packs")
+    data_dir = cfg.get_path("data_dir", "./forge-data")
+    active = get_active_pack(data_dir)
+    packs = list_packs(packs_dir)
+    # also surface the legacy single pack_path if configured
+    legacy = cfg.get_path("identity.pack_path")
+    if legacy and Path(legacy).is_file() and not any(
+            p["path"] == str(Path(legacy)) for p in packs):
+        packs.append({"path": str(Path(legacy)), "name": "(legacy pack)",
+                      "version": 1, "status": "valid"})
+    if not packs:
+        typer.echo(f"No packs in {packs_dir}. Create one with "
+                   "`forge identity create`.")
+        return
+    for p in packs:
+        marker = "  <-- active" if active and Path(p["path"]) == Path(active) \
+            else ""
+        typer.echo(f"- {p['name']} v{p['version']} [{p['status']}]")
+        typer.echo(f"    {p['path']}{marker}")
+
+
+@identity_app.command("use")
+def identity_use_cmd(
+    pack: str = typer.Argument(..., help="Pack path to make active."),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Switch the active persona (validates consent first)."""
+    from forge.identity.pack import set_active_pack
+    cfg = _cfg(config)
+    try:
+        path = set_active_pack(pack, cfg.get_path("data_dir",
+                                                  "./forge-data"))
+    except InvalidConsentError as e:
+        typer.echo(f"INVALID: {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Active persona pack: {path}")
+
+
+@identity_app.command("new-version")
+def identity_new_version_cmd(
+    pack: str = typer.Argument(...),
+    notes: str = typer.Option("", "--notes"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Create a versioned copy of a pack (v1 -> v2, original untouched)."""
+    from forge.identity.pack import bump_pack_version
+    try:
+        dest = bump_pack_version(pack, notes)
+    except InvalidConsentError as e:
+        typer.echo(f"INVALID: {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"New version written to {dest}")
+
+
+# -- vault: backup / restore ---------------------------------------------------
+@vault_app.command("backup")
+def vault_backup(
+    path: str = typer.Argument("./forge-data/vault"),
+    out: str = typer.Option("forge-backup.enc", "--out"),
+    password: Optional[str] = typer.Option(None, "--password"),
+):
+    """Encrypted backup: vault blobs + settings + databases.
+
+    Everything is encrypted with your vault password into one file.
+    Restore with: forge vault restore --backup forge-backup.enc
+    """
+    from forge.vault.bundle import collect_dir, write_bundle_file
+    v = _open_vault(path, password)
+    files: dict[str, bytes] = {}
+    # vault blobs (raw .enc files, still encrypted -- double-wrapped, fine)
+    files.update(collect_dir(Path(path) / "data", "vault/data"))
+    files["vault/vault.json"] = (Path(path) / "vault.json").read_bytes()
+    # settings + operational databases next to the vault
+    data_dir = Path(path).parent
+    for name in ("catalog.db", "schedule.db", "analytics.db",
+                 "video-queue.db", "chat-queue.json", "chat-modes.json",
+                 "chat-templates.json", "promptlib.json",
+                 "style-profile.json"):
+        p = data_dir / name
+        if p.is_file():
+            files[f"data/{name}"] = p.read_bytes()
+    cfg_yaml = Path("forge.yaml")
+    if cfg_yaml.is_file():
+        files["settings/forge.yaml"] = cfg_yaml.read_bytes()
+    pw = _vault_password(password)
+    dest = write_bundle_file(files, out, pw,
+                             meta={"kind": "creatorforge-backup",
+                                   "version": 1})
+    typer.echo(f"Backup ({len(files)} files) written encrypted to {dest}.")
+    typer.echo("Keep the password safe -- without it the backup is useless.")
+
+
+@vault_app.command("restore")
+def vault_restore(
+    backup: str = typer.Option(..., "--backup"),
+    dest: str = typer.Option("./forge-restore", "--dest"),
+    password: Optional[str] = typer.Option(None, "--password"),
+):
+    """Restore an encrypted backup into a folder (docs/SETUP.md: Restore)."""
+    from forge.vault.bundle import BundleError, open_bundle
+    pw = _vault_password(password)
+    try:
+        files, meta = open_bundle(Path(backup).read_bytes(), pw)
+    except BundleError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    if meta.get("kind") != "creatorforge-backup":
+        typer.echo("This is not a CreatorForge backup bundle.", err=True)
+        raise typer.Exit(1)
+    dest_p = Path(dest)
+    restored = 0
+    for name, data in files.items():
+        target = dest_p / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        restored += 1
+    typer.echo(f"Restored {restored} files to {dest_p}.")
+    typer.echo("To use it: copy vault/ back over your vault dir (after "
+               "unlocking to confirm), and data/*.db / *.json over "
+               "forge-data/. See docs/SETUP.md for the full checklist.")
+
+
+# -- profile export / import ---------------------------------------------------
+@app.command("export-profile")
+def export_profile_cmd(
+    out: str = typer.Option("forge-profile.enc", "--out"),
+    password: Optional[str] = typer.Option(None, "--password",
+                                           help="Bundle password."),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Export settings+persona+packs+templates as ONE encrypted bundle.
+
+    The vault itself is NOT included (move secrets separately with
+    `forge vault backup`). Import with: forge import-profile
+    """
+    from forge.profile import export_profile
+    from forge.vault.bundle import BundleError
+    pw = password or typer.prompt("Bundle password", hide_input=True,
+                                  confirmation_prompt=True)
+    try:
+        dest = export_profile(_cfg(config), out, pw)
+    except BundleError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Profile exported encrypted to {dest}.")
+    typer.echo("The bundle password is the only key -- don't lose it.")
+
+
+@app.command("import-profile")
+def import_profile_cmd(
+    bundle: str = typer.Argument(...),
+    dest: str = typer.Option(".", "--dest"),
+    password: Optional[str] = typer.Option(None, "--password"),
+):
+    """Unpack an exported profile bundle into a folder."""
+    from forge.profile import import_profile
+    from forge.vault.bundle import BundleError
+    pw = password or typer.prompt("Bundle password", hide_input=True,
+                                  confirmation_prompt=False)
+    try:
+        result = import_profile(bundle, dest, pw)
+    except BundleError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Restored {result['count']} files into {dest}:")
+    for name in result["restored"]:
+        typer.echo(f"  {name}")
+    typer.echo("Next: review settings/forge.yaml, move files into place, "
+               "then run `forge identity validate`.")
+
+
 # -- dashboard ---------------------------------------------------------------
 @app.command()
 def dashboard(config: Optional[str] = typer.Option(None, "--config"),
@@ -713,6 +1326,1099 @@ def dashboard(config: Optional[str] = typer.Option(None, "--config"),
     import uvicorn
     from forge.dashboard.app import create_app
     uvicorn.run(create_app(config), host=host, port=port)
+
+
+@app.command()
+def gui(config: Optional[str] = typer.Option(None, "--config")):
+    """Launch the desktop GUI (needs `pip install "creator-forge[gui]"`)."""
+    from forge.gui import launch
+    raise SystemExit(launch(config))
+
+
+# -- spicy chat (consent-gated) ----------------------------------------------
+
+def _resolve_pack(pack: "str | None", cfg) -> str:
+    from forge.identity.pack import resolve_pack_path
+    path = resolve_pack_path(pack, cfg)
+    if not path:
+        raise typer.BadParameter(
+            "No identity pack: pass --pack, set one active "
+            "(`forge identity use`), or set identity.pack_path.")
+    return path
+
+
+def _spicy_engine(cfg, pack: "str | None"):
+    """Build a consent-gated SpicyEngine sharing the main approval queue."""
+    from forge.chat.spicy import SpicyEngine, SpicyConsentError
+    pack_path = _resolve_pack(pack, cfg)
+    engine = _load_engine(cfg)  # shared queue/modes persistence
+    try:
+        spicy = SpicyEngine.from_pack(
+            pack_path, queue=engine.queue, config=cfg,
+            heat_path=cfg.get_path("chat.spicy_heat_path",
+                                   "./forge-data/chat-spicy-heat.json"))
+    except SpicyConsentError as e:
+        typer.echo(f"REFUSED: {e}", err=True)
+        raise typer.Exit(2)
+    return spicy, engine
+
+
+@chat_app.command("spicy-templates")
+def chat_spicy_templates(
+    action: str = typer.Argument(..., help="list | add | delete"),
+    tier: str = typer.Option("playful", "--tier",
+                             help="playful | teasing | explicit"),
+    name: str = typer.Option("", "--name"),
+    text: str = typer.Option("", "--text"),
+    pack: "str | None" = typer.Option(None, "--pack"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Manage spicy reply templates. Consent-gated: the identity pack's
+    scope must explicitly cover spicy/adult chat."""
+    from forge.chat.spicy import (
+        TIERS, add_spicy_template, delete_spicy_template,
+        ensure_spicy_defaults, load_spicy_templates, require_spicy_consent,
+    )
+    require_spicy_consent(_resolve_pack(pack, _cfg(config)))
+    ensure_spicy_defaults()
+    if action == "list":
+        tiers = load_spicy_templates()
+        for t in TIERS:
+            typer.echo(f"== {t} ==")
+            for n, txt in sorted(tiers.get(t, {}).items()):
+                typer.echo(f"  [{n}] {txt[:90]}")
+    elif action == "add":
+        if not name or not text:
+            raise typer.BadParameter("add needs --name and --text.")
+        add_spicy_template(tier, name, text)
+        typer.echo(f"Added [{tier}/{name}].")
+    elif action == "delete":
+        if not name:
+            raise typer.BadParameter("delete needs --name.")
+        delete_spicy_template(tier, name)
+        typer.echo(f"Deleted [{tier}/{name}].")
+    else:
+        raise typer.BadParameter("action must be list | add | delete.")
+
+
+@chat_app.command("spicy-tier")
+def chat_spicy_tier(
+    platform: str = typer.Option(...),
+    sender: str = typer.Option(...),
+    tier: str = typer.Option(..., help="playful | teasing | explicit"),
+    pack: "str | None" = typer.Option(None, "--pack"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Set the spicy tier ("heat") for one conversation. Only SHE changes
+    this -- the bot never escalates on its own."""
+    spicy, _ = _spicy_engine(_cfg(config), pack)
+    spicy.set_tier(platform, sender, tier)
+    typer.echo(f"Spicy tier for ({platform}, {sender}) set to '{tier}'.")
+
+
+@chat_app.command("spicy-draft")
+def chat_spicy_draft(
+    platform: str = typer.Option(...),
+    sender: str = typer.Option(...),
+    text: str = typer.Option(..., help="The fan's incoming message."),
+    pack: "str | None" = typer.Option(None, "--pack"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Draft a spicy reply into the approval queue (never auto-approved)."""
+    from forge.pay.links import build_payment_links
+    cfg = _cfg(config)
+    spicy, engine = _spicy_engine(cfg, pack)
+    links = build_payment_links(cfg)
+    menu = cfg.get_path("pay.tip_menu", []) or []
+    draft = spicy.draft(platform=platform, sender=sender, text=text,
+                        links=links, menu=menu)
+    _save_engine_queue(engine)
+    typer.echo(f"Spicy draft #{draft.id} [{draft.trigger}] "
+               f"tier={spicy.get_tier(platform, sender)} status={draft.status}:")
+    typer.echo(f"  In:  {draft.incoming}")
+    typer.echo(f"  Out: {draft.reply}")
+
+
+# -- media triage ------------------------------------------------------------
+
+def _triage_queue(cfg):
+    from forge.chat.triage import TriageQueue, get_classifier
+    name = ""
+    try:
+        name = cfg.get_path("chat.triage.nsfw_classifier", "") or "none"
+    except Exception:
+        name = "none"
+    return TriageQueue(
+        cfg.get_path("chat.triage_db", "./forge-data/triage.db"),
+        thumbs_dir=cfg.get_path("chat.triage_thumbs_dir",
+                                "./forge-data/triage-thumbs"),
+        classifier=get_classifier(name or "none"))
+
+
+@chat_app.command("triage-add")
+def chat_triage_add(
+    platform: str = typer.Option(...),
+    sender: str = typer.Option(...),
+    media: str = typer.Option(..., help="Path to the fan-sent image."),
+    note: str = typer.Option("", "--note"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Queue a fan-sent pic for her review (blurred thumbnail). Drafts a
+    'got your pic' reply into the approval queue -- never auto-sent."""
+    from forge.chat.triage import triage_auto_reply_text
+    cfg = _cfg(config)
+    q = _triage_queue(cfg)
+    try:
+        item = q.add(platform=platform, sender=sender, media_path=media,
+                     note=note)
+    finally:
+        q.close()
+    typer.echo(f"Triage item #{item.id} queued (nsfw: {item.nsfw_label}). "
+               f"Blurred thumb: {item.thumb_path}")
+    engine = _load_engine(cfg)
+    draft = engine.queue.add(
+        platform=platform, sender=sender,
+        incoming=f"(triage #{item.id}: fan sent a pic)",
+        reply=triage_auto_reply_text(cfg), trigger="triage:auto-reply")
+    _save_engine_queue(engine)
+    typer.echo(f"Auto-reply drafted as #{draft.id} (pending approval).")
+
+
+@chat_app.command("triage-list")
+def chat_triage_list(
+    status: str = typer.Option("pending", "--status",
+                               help="pending | approved | skipped"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """List triage items awaiting her review."""
+    cfg = _cfg(config)
+    q = _triage_queue(cfg)
+    try:
+        items = q.list(status=status)
+    finally:
+        q.close()
+    if not items:
+        typer.echo(f"No {status} triage items.")
+        return
+    for it in items:
+        typer.echo(f"#{it.id} [{it.platform}/{it.sender}] {it.status} "
+                   f"nsfw={it.nsfw_label} thumb={it.thumb_path}")
+
+
+@chat_app.command("triage-approve")
+def chat_triage_approve(item_id: int = typer.Argument(...),
+                        config: "str | None" = typer.Option(None, "--config")):
+    """Mark a triage item reviewed-and-fine."""
+    q = _triage_queue(_cfg(config))
+    try:
+        it = q.approve(item_id)
+    finally:
+        q.close()
+    typer.echo(f"Triage item #{it.id} approved.")
+
+
+@chat_app.command("triage-skip")
+def chat_triage_skip(item_id: int = typer.Argument(...),
+                     config: "str | None" = typer.Option(None, "--config")):
+    """Skip a triage item (she doesn't want to deal with it)."""
+    q = _triage_queue(_cfg(config))
+    try:
+        it = q.skip(item_id)
+    finally:
+        q.close()
+    typer.echo(f"Triage item #{it.id} skipped.")
+
+
+# -- custom video orders -------------------------------------------------------
+orders_app = typer.Typer(help="Custom video order commands.", no_args_is_help=True)
+app.add_typer(orders_app, name="orders")
+
+
+def _order_store(cfg):
+    from forge.orders.store import OrderStore
+    return OrderStore(cfg.get_path("orders.db_path",
+                                   "./forge-data/orders.db"))
+
+
+def _show_order(order) -> None:
+    typer.echo(f"#{order.id} [{order.status}] {order.scene_name} "
+               f"for {order.fan_handle} ({order.platform}) "
+               f"{order.price_label} {order.price}".rstrip())
+
+
+@orders_app.command("scenes")
+def orders_scenes(pack: "str | None" = typer.Option(None, "--pack"),
+                  config: "str | None" = typer.Option(None, "--config")):
+    """List scene templates with comfort decisions (what fans may order)."""
+    from forge.orders.flow import list_orderable_scenes
+    cfg = _cfg(config)
+    pack_path = _resolve_pack(pack, cfg)
+    for s in list_orderable_scenes(cfg, pack_path):
+        flag = "ORDERABLE" if s["orderable"] else f"NOT orderable ({s['mode']})"
+        typer.echo(f"- {s['name']}: {flag}\n    {s['reason']}")
+
+
+@orders_app.command("create")
+def orders_create(
+    fan: str = typer.Option(..., "--fan", help="Fan handle."),
+    scene: str = typer.Option(..., "--scene", help="Scene YAML path."),
+    pack: "str | None" = typer.Option(None, "--pack"),
+    platform: str = typer.Option("", "--platform"),
+    price_label: str = typer.Option("", "--price-label"),
+    price: str = typer.Option("", "--price"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Create a custom video order (pending_payment). Refused outright if
+    the scene hits a comfort boundary."""
+    from forge.orders.flow import OrderRefusedError, create_order
+    cfg = _cfg(config)
+    pack_path = _resolve_pack(pack, cfg)
+    store = _order_store(cfg)
+    try:
+        order = create_order(store, fan_handle=fan, scene_path=scene,
+                             pack_path=pack_path, platform=platform,
+                             price_label=price_label, price=price)
+    except OrderRefusedError as e:
+        typer.echo(f"REFUSED: {e}", err=True)
+        raise typer.Exit(3)
+    finally:
+        store.close()
+    typer.echo("Order created (pending_payment). Send her payment link, "
+               "then `forge orders pay`.")
+    _show_order(order)
+
+
+@orders_app.command("list")
+def orders_list(status: "str | None" = typer.Option(None, "--status"),
+                config: "str | None" = typer.Option(None, "--config")):
+    """List orders, optionally filtered by status."""
+    store = _order_store(_cfg(config))
+    try:
+        orders = store.list(status=status)
+    finally:
+        store.close()
+    if not orders:
+        typer.echo("No orders.")
+        return
+    for o in orders:
+        _show_order(o)
+
+
+def _order_transition(cmd_name: str, to: str, order_id: int, cfg,
+                      **fields):
+    from forge.orders.flow import (
+        cancel_order, deliver_order, mark_paid, refund_order,
+        render_order, review_order, OrderRefusedError,
+    )
+    from forge.video.queue import VideoQueue
+    store = _order_store(cfg)
+    try:
+        if to == "queued":
+            order = mark_paid(store, order_id)
+        elif to == "rendering":
+            pack_path = _resolve_pack(None, cfg)
+            queue = VideoQueue(cfg.get_path("video.queue_db",
+                                            "./forge-data/video-queue.db"))
+            try:
+                order = render_order(store, queue, cfg, order_id, pack_path)
+            finally:
+                queue.close()
+        elif to == "awaiting_review":
+            queue = VideoQueue(cfg.get_path("video.queue_db",
+                                            "./forge-data/video-queue.db"))
+            try:
+                order = review_order(store, queue, order_id)
+            finally:
+                queue.close()
+        elif to == "delivered":
+            order = deliver_order(store, order_id, **fields)
+        elif to == "cancelled":
+            order = cancel_order(store, order_id, **fields)
+        elif to == "refunded":
+            order = refund_order(store, order_id)
+        else:
+            raise AssertionError(to)
+    except OrderRefusedError as e:
+        typer.echo(f"REFUSED: {e}", err=True)
+        raise typer.Exit(3)
+    finally:
+        store.close()
+    typer.echo(f"Order #{order.id} -> {order.status}.")
+    _show_order(order)
+
+
+@orders_app.command("pay")
+def orders_pay(order_id: int = typer.Argument(...),
+               config: "str | None" = typer.Option(None, "--config")):
+    """Confirm payment received: pending_payment -> queued."""
+    _order_transition("pay", "queued", order_id, _cfg(config))
+
+
+@orders_app.command("render")
+def orders_render(order_id: int = typer.Argument(...),
+                  config: "str | None" = typer.Option(None, "--config")):
+    """Enqueue the video job: queued -> rendering."""
+    _order_transition("render", "rendering", order_id, _cfg(config))
+
+
+@orders_app.command("review")
+def orders_review(order_id: int = typer.Argument(...),
+                  config: "str | None" = typer.Option(None, "--config")):
+    """Video job done -> awaiting_review (she looks before delivery)."""
+    _order_transition("review", "awaiting_review", order_id, _cfg(config))
+
+
+@orders_app.command("approve")
+def orders_approve(order_id: int = typer.Argument(...),
+                   note: str = typer.Option("", "--note"),
+                   config: "str | None" = typer.Option(None, "--config")):
+    """She reviewed the finished video and approves it: -> delivered."""
+    _order_transition("approve", "delivered", order_id, _cfg(config),
+                      delivery_note=note)
+
+
+@orders_app.command("deliver")
+def orders_deliver(order_id: int = typer.Argument(...),
+                   note: str = typer.Option("", "--note",
+                                            help="Where/how it was sent."),
+                   config: "str | None" = typer.Option(None, "--config")):
+    """Log delivery to the fan: awaiting_review -> delivered."""
+    _order_transition("deliver", "delivered", order_id, _cfg(config),
+                      delivery_note=note)
+
+
+@orders_app.command("cancel")
+def orders_cancel(order_id: int = typer.Argument(...),
+                  reason: str = typer.Option("", "--reason"),
+                  config: "str | None" = typer.Option(None, "--config")):
+    """Cancel an order."""
+    _order_transition("cancel", "cancelled", order_id, _cfg(config),
+                      reason=reason)
+
+
+@orders_app.command("refund")
+def orders_refund(order_id: int = typer.Argument(...),
+                  config: "str | None" = typer.Option(None, "--config")):
+    """Mark a cancelled order refunded."""
+    _order_transition("refund", "refunded", order_id, _cfg(config))
+
+
+# -- live avatar ---------------------------------------------------------------
+live_app = typer.Typer(help="Live AI avatar session commands.",
+                       no_args_is_help=True)
+app.add_typer(live_app, name="live")
+
+
+def _live_manager(cfg):
+    from forge.live.session import LiveSessionManager
+    return LiveSessionManager(cfg.get_path("data_dir", "./forge-data"))
+
+
+@live_app.command("start")
+def live_start(
+    provider: str = typer.Option(..., "--provider",
+                                 help="heygen | did | local-guide"),
+    api_key: str = typer.Option("", "--api-key",
+                                help="Provider key (or set in forge.yaml)."),
+    avatar_id: str = typer.Option("", "--avatar-id"),
+    voice_id: str = typer.Option("", "--voice-id"),
+    source_image: str = typer.Option("", "--source-image",
+                                     help="D-ID source image URL."),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Start a live avatar session (real provider APIs; local-guide prints
+    the honest OBS setup instead of starting anything)."""
+    from forge.live.adapters import LiveNotConfiguredError
+    from forge.live.session import local_guide_text
+    cfg = _cfg(config)
+    if provider == "local-guide":
+        typer.echo(local_guide_text())
+        return
+    mgr = _live_manager(cfg)
+    kwargs: dict[str, str] = {}
+    if avatar_id:
+        kwargs["avatar_id"] = avatar_id
+    if voice_id:
+        kwargs["voice_id"] = voice_id
+    if source_image:
+        kwargs["source_image_url"] = source_image
+    try:
+        session = mgr.start(provider, cfg, api_key=api_key, **kwargs)
+    except LiveNotConfiguredError as e:
+        typer.echo(f"NOT CONFIGURED: {e}", err=True)
+        raise typer.Exit(2)
+    except RuntimeError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Live session started via {session['provider']}.")
+    typer.echo(f"  started: {session['started_at']}")
+    info = session.get("info", {})
+    for k in ("session_id", "id", "url", "note"):
+        if info.get(k):
+            typer.echo(f"  {k}: {info[k]}")
+
+
+@live_app.command("stop")
+def live_stop(config: "str | None" = typer.Option(None, "--config")):
+    """Stop the active live session."""
+    result = _live_manager(_cfg(config)).stop(_cfg(config))
+    if result.get("stopped"):
+        typer.echo("Live session stopped.")
+    else:
+        typer.echo(result.get("note", "No active live session."))
+
+
+@live_app.command("status")
+def live_status(config: "str | None" = typer.Option(None, "--config")):
+    """Show the live session status."""
+    import yaml as _yaml
+    st = _live_manager(_cfg(config)).status()
+    typer.echo(_yaml.safe_dump(st, sort_keys=False))
+
+
+# -- fan CRM -------------------------------------------------------------------
+crm_app = typer.Typer(help="Fan/subscriber CRM commands.",
+                      no_args_is_help=True)
+app.add_typer(crm_app, name="crm")
+
+
+def _crm(cfg):
+    from forge.crm.store import FanCRM
+    return FanCRM(cfg.get_path("crm.db_path", "./forge-data/crm.db"))
+
+
+@crm_app.command("add")
+def crm_add(platform: str = typer.Option(...),
+            handle: str = typer.Option(...),
+            config: "str | None" = typer.Option(None, "--config")):
+    """Add (or fetch) a fan record."""
+    c = _crm(_cfg(config))
+    fan = c.upsert_fan(platform=platform, handle=handle)
+    c.close()
+    typer.echo(yaml.safe_dump(fan, sort_keys=False))
+
+
+@crm_app.command("show")
+def crm_show(platform: str = typer.Option(...),
+             handle: str = typer.Option(...),
+             config: "str | None" = typer.Option(None, "--config")):
+    """Show a fan's full profile + buyer-intent score."""
+    c = _crm(_cfg(config))
+    fan = c.get_fan(platform, handle)
+    if not fan:
+        typer.echo(f"No fan {handle} on {platform}.", err=True)
+        raise typer.Exit(1)
+    score = c.buyer_intent(platform, handle)
+    c.close()
+    typer.echo(yaml.safe_dump({**fan, "buyer_intent": score},
+                              sort_keys=False))
+
+
+@crm_app.command("list")
+def crm_list(platform: "str | None" = typer.Option(None, "--platform"),
+             status: "str | None" = typer.Option(None, "--status"),
+             tag: "str | None" = typer.Option(None, "--tag"),
+             config: "str | None" = typer.Option(None, "--config")):
+    """List fans (optionally filtered)."""
+    c = _crm(_cfg(config))
+    for f in c.list_fans(platform=platform, status=status, tag=tag):
+        typer.echo(f"{f['platform']:10} {f['handle']:20} "
+                   f"${f['total_spend']:.0f} msgs={f['message_count']} "
+                   f"[{f['status']}] tags={','.join(f['tags'])}")
+    c.close()
+
+
+@crm_app.command("tag")
+def crm_tag(platform: str = typer.Option(...),
+            handle: str = typer.Option(...),
+            tag: str = typer.Option(...),
+            config: "str | None" = typer.Option(None, "--config")):
+    """Tag a fan (e.g. whale, online, vip)."""
+    c = _crm(_cfg(config))
+    fan = c.add_tag(platform, handle, tag)
+    c.close()
+    typer.echo(f"Tags for {handle}: {','.join(fan['tags'])}")
+
+
+@crm_app.command("untag")
+def crm_untag(platform: str = typer.Option(...),
+              handle: str = typer.Option(...),
+              tag: str = typer.Option(...),
+              config: "str | None" = typer.Option(None, "--config")):
+    """Remove a tag from a fan."""
+    c = _crm(_cfg(config))
+    fan = c.remove_tag(platform, handle, tag)
+    c.close()
+    typer.echo(f"Tags for {handle}: {','.join(fan['tags'])}")
+
+
+@crm_app.command("note")
+def crm_note(platform: str = typer.Option(...),
+             handle: str = typer.Option(...),
+             note: str = typer.Option(...),
+             config: "str | None" = typer.Option(None, "--config")):
+    """Append a timestamped note to a fan."""
+    c = _crm(_cfg(config))
+    c.add_note(platform, handle, note)
+    c.close()
+    typer.echo("Note saved.")
+
+
+@crm_app.command("spend")
+def crm_spend(platform: str = typer.Option(...),
+              handle: str = typer.Option(...),
+              amount: float = typer.Option(...),
+              config: "str | None" = typer.Option(None, "--config")):
+    """Record a purchase from a fan (updates LTV)."""
+    c = _crm(_cfg(config))
+    fan = c.record_spend(platform, handle, amount)
+    c.close()
+    typer.echo(f"{handle}: total spend now ${fan['total_spend']:.2f} "
+               f"({fan['purchase_count']} purchases)")
+
+
+@crm_app.command("message")
+def crm_message(platform: str = typer.Option(...),
+                handle: str = typer.Option(...),
+                config: "str | None" = typer.Option(None, "--config")):
+    """Log that a fan sent a message (activity tracking)."""
+    c = _crm(_cfg(config))
+    c.record_message(platform, handle)
+    c.close()
+    typer.echo("Logged.")
+
+
+@crm_app.command("set-status")
+def crm_set_status(platform: str = typer.Option(...),
+                   handle: str = typer.Option(...),
+                   status: str = typer.Option(...,
+                                              help="new/active/expired/vip"),
+                   config: "str | None" = typer.Option(None, "--config")):
+    """Set a fan's status."""
+    c = _crm(_cfg(config))
+    c.set_status(platform, handle, status)
+    c.close()
+    typer.echo(f"{handle} -> {status}")
+
+
+@crm_app.command("score")
+def crm_score(platform: str = typer.Option(...),
+              handle: str = typer.Option(...),
+              config: "str | None" = typer.Option(None, "--config")):
+    """Rules-based buyer-intent score for a fan (heuristic, not ML)."""
+    c = _crm(_cfg(config))
+    s = c.buyer_intent(platform, handle)
+    c.close()
+    typer.echo(f"Buyer intent: {s['score']}/100 ({s['method']})")
+    for r in s["reasons"]:
+        typer.echo(f"  + {r}")
+
+
+@crm_app.command("smart-list")
+def crm_smart_list(kind: str = typer.Option(...,
+                                           help="whales/new/active/expired/quiet/online"),
+                   platform: "str | None" = typer.Option(None, "--platform"),
+                   config: "str | None" = typer.Option(None, "--config")):
+    """Show a pre-built fan segment."""
+    c = _crm(_cfg(config))
+    try:
+        fans = c.smart_list(kind, platform=platform)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    for f in fans:
+        typer.echo(f"{f['platform']:10} {f['handle']:20} "
+                   f"${f['total_spend']:.0f}")
+    typer.echo(f"{len(fans)} fan(s) in '{kind}'.")
+    c.close()
+
+
+@crm_app.command("import-csv")
+def crm_import_csv(csv_path: str = typer.Option(..., "--csv"),
+                   config: "str | None" = typer.Option(None, "--config")):
+    """Import fans from a CSV YOU exported from each site.
+
+    Columns: platform,handle[,tags,notes,total_spend,status].
+    Tags are ';'-separated.
+    """
+    c = _crm(_cfg(config))
+    n = c.import_csv(csv_path)
+    c.close()
+    typer.echo(f"Imported {n} fan(s).")
+
+
+@crm_app.command("stats")
+def crm_stats(platform: "str | None" = typer.Option(None, "--platform"),
+              config: "str | None" = typer.Option(None, "--config")):
+    """Per-fan reply/spend stats for her own review."""
+    c = _crm(_cfg(config))
+    for s in c.conversation_stats(platform=platform):
+        typer.echo(f"{s['platform']:10} {s['handle']:20} "
+                   f"msgs={s['messages']} buys={s['purchases']} "
+                   f"${s['total_spend']:.0f} [{s['status']}]")
+    c.close()
+
+
+# -- spicy livestreaming -------------------------------------------------------
+stream_app = typer.Typer(help="Spicy livestream (AFK avatar) commands.",
+                         no_args_is_help=True)
+app.add_typer(stream_app, name="stream")
+
+
+def _stream_mgr(cfg):
+    from forge.stream.session import StreamSessionManager
+    return StreamSessionManager(cfg.get_path("data_dir", "./forge-data"))
+
+
+@stream_app.command("platforms")
+def stream_platforms():
+    """Show the honest per-platform streaming capability matrix."""
+    from forge.stream.platforms import list_platforms
+    for p in list_platforms():
+        typer.echo(f"\n== {p['label']} [{p['key']}] ==")
+        typer.echo(f"   RTMP ingest: {'yes' if p['rtmp_ingest'] else 'no'}"
+                   f" -- {p['rtmp_notes']}")
+        typer.echo(f"   Chat API: {p['chat_api']} -- {p['chat_notes']}")
+        typer.echo(f"   Verification: {p['verification']}")
+        typer.echo(f"   ToS risk (AFK avatar): {p['tos_risk']}")
+        typer.echo(f"   Payout: {p['payout_notes']}")
+    typer.echo("\nDetails: docs/STREAMING.md. Verify on each platform's "
+               "broadcaster pages before going live.")
+
+
+@stream_app.command("setup")
+def stream_setup(platform: str = typer.Option(...),
+                 config: "str | None" = typer.Option(None, "--config")):
+    """Print the setup steps for one platform (key, RTMP, OBS)."""
+    from forge.stream.platforms import get_platform
+    cfg = _cfg(config)
+    try:
+        p = get_platform(platform)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    key = p["key"]
+    has_rtmp = bool(cfg.get_path(f"stream.{key}_rtmp", ""))
+    has_key = bool(cfg.get_path(f"stream.{key}_key", ""))
+    typer.echo(f"Setup for {p['label']}:")
+    typer.echo(f"  1. Get verified as a broadcaster ({p['verification']}).")
+    typer.echo(f"  2. Copy the RTMP URL + stream key from the broadcaster "
+               f"dashboard.")
+    typer.echo(f"  3. Set stream.{key}_rtmp "
+               f"({'set' if has_rtmp else 'MISSING'}) and "
+               f"stream.{key}_key ({'set' if has_key else 'MISSING'}) "
+               f"in forge.yaml.")
+    typer.echo(f"  4. OBS: Settings -> Stream -> Custom, paste server + key.")
+    typer.echo(f"  5. {p['rtmp_notes']}")
+    typer.echo(f"  Risk: {p['tos_risk']}")
+
+
+@stream_app.command("go-live")
+def stream_go_live(
+    platform: str = typer.Option(...),
+    avatar: str = typer.Option("loop",
+                               help="loop | sadtalker | heygen | did"),
+    avatar_source: str = typer.Option(
+        "", "--avatar-source",
+        help="Video file (loop) or portrait image (sadtalker)."),
+    i_understand_the_risk: bool = typer.Option(
+        False, "--i-understand-the-risk",
+        help="Confirm you read the ToS risk note."),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Start an AFK stream session (avatar -> OBS -> RTMP).
+
+    CreatorForge does NOT stream to the platform itself: OBS does the
+    RTMP ingest with YOUR stream key. This tracks the session and
+    drives the avatar side. Most cam sites expect a live verified
+    performer -- AFK avatar streaming can get the account banned.
+    """
+    from forge.stream.platforms import get_platform
+    from forge.stream.session import StreamNotConfiguredError
+    cfg = _cfg(config)
+    try:
+        p = get_platform(platform)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    if not i_understand_the_risk:
+        typer.echo("ToS RISK -- read this first:", err=True)
+        typer.echo(f"  {p['tos_risk']}", err=True)
+        typer.echo("Re-run with --i-understand-the-risk to confirm.",
+                   err=True)
+        raise typer.Exit(2)
+    mgr = _stream_mgr(cfg)
+    try:
+        session = mgr.go_live(platform=platform, config=cfg, avatar=avatar,
+                              avatar_source=avatar_source,
+                              acknowledged_risk=True)
+    except (StreamNotConfiguredError, RuntimeError, ValueError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"AFK stream session started on {session['platform_label']}.")
+    typer.echo(f"Avatar mode: {avatar}. Chat: {session['chat_mode']}.")
+    typer.echo("Checklist:")
+    for step in session["checklist"]:
+        typer.echo(f"  - {step}")
+
+
+@stream_app.command("stop")
+def stream_stop(config: "str | None" = typer.Option(None, "--config")):
+    """Stop the active AFK stream session."""
+    result = _stream_mgr(_cfg(config)).stop()
+    typer.echo(result.get("note", "No active stream session."))
+
+
+@stream_app.command("status")
+def stream_status(config: "str | None" = typer.Option(None, "--config")):
+    """Show the AFK stream session status."""
+    st = _stream_mgr(_cfg(config)).status()
+    typer.echo(yaml.safe_dump(st, sort_keys=False))
+
+
+# -- content ideas ---------------------------------------------------------------
+content_app = typer.Typer(help="Content idea generator commands.",
+                          no_args_is_help=True)
+app.add_typer(content_app, name="content")
+
+
+@content_app.command("ideas")
+def content_ideas(
+    count: int = typer.Option(10, "--count"),
+    seed: str = typer.Option("forge", "--seed",
+                             help="Change for a fresh batch."),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Generate post ideas from her catalog tags + templates.
+
+    Template remix of HER material -- not generative AI. She picks and
+    rewrites what she likes.
+    """
+    from forge.content.ideas import catalog_tags_for_ideas, generate_ideas
+    cfg = _cfg(config)
+    store = CatalogStore(cfg.get_path("catalog.db_path",
+                                      "./forge-data/catalog.db"))
+    items = store.list(limit=500)
+    store.close()
+    tags = catalog_tags_for_ideas(items)
+    ideas = generate_ideas(catalog_tags=tags, count=count, seed_salt=seed)
+    for i, idea in enumerate(ideas, 1):
+        typer.echo(f"\n{i}. [{idea['angle']}] {idea['caption']}")
+        typer.echo(f"   {idea['hashtags']}")
+    typer.echo(f"\n({ideas[0]['method']})" if ideas else "")
+
+
+# -- chat: PPV / flows / humanizer / compliance -----------------------------------
+@chat_app.command("ppv")
+def chat_ppv(platform: str = typer.Option(...),
+             sender: str = typer.Option(...),
+             text: str = typer.Option(..., help="The fan's message."),
+             config: "str | None" = typer.Option(None, "--config")):
+    """Draft a PPV upsell offer if the message shows buying intent.
+
+    Goes to the approval queue like everything else -- never auto-sends.
+    """
+    from forge.chat.ppv import ppv_offer_text
+    cfg = _cfg(config)
+    engine = _load_engine(cfg)
+    price_menu = cfg.get_path("orders.price_menu") or \
+        cfg.get_path("pay.tip_menu", []) or []
+    offer = ppv_offer_text(fan_message=text, price_menu=price_menu,
+                           pay_links=build_payment_links(cfg),
+                           sender=sender)
+    if not offer:
+        typer.echo("No buying intent detected -- no offer drafted.")
+        return
+    draft = engine.queue.add(platform=platform, sender=sender,
+                             incoming=text, reply=offer, trigger="ppv")
+    _save_engine_queue(engine)
+    typer.echo(f"PPV draft #{draft.id} queued for approval:")
+    typer.echo(f"  {offer}")
+
+
+@chat_app.command("flows")
+def chat_flows(
+    action: str = typer.Option(..., "--action",
+                               help="enroll | run | pending | cancel | list"),
+    flow: str = typer.Option("", "--flow",
+                             help="welcome | winback | nudge"),
+    platform: str = typer.Option("", "--platform"),
+    handle: str = typer.Option("", "--handle",
+                               help="Fan handle."),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Welcome / win-back / online-nudge message flows.
+
+    `run` drafts due steps into the approval queue -- nothing auto-sends.
+    """
+    from forge.chat.flows import FlowRunner, run_due
+    cfg = _cfg(config)
+    runner = FlowRunner(cfg.get_path("chat.flows_db",
+                                     "./forge-data/chat-flows.db"))
+    if action == "list":
+        typer.echo("Available flows: "
+                   + ", ".join(sorted(runner.flows)))
+        for name, steps in runner.flows.items():
+            typer.echo(f"\n{name}:")
+            for s in steps:
+                typer.echo(f"  +{s['delay_hours']}h: {s['template'][:60]}")
+    elif action == "enroll":
+        if not flow or not platform or not handle:
+            typer.echo("--flow, --platform and --handle are required.",
+                       err=True)
+            raise typer.Exit(1)
+        typer.echo(yaml.safe_dump(
+            runner.enroll(flow, platform, handle), sort_keys=False))
+    elif action == "run":
+        engine = _load_engine(cfg)
+        drafts = run_due(runner, engine)
+        _save_engine_queue(engine)
+        typer.echo(f"Drafted {len(drafts)} due flow step(s) for approval.")
+    elif action == "pending":
+        for r in runner.pending():
+            typer.echo(f"{r['flow']:8} {r['platform']:10} {r['handle']:20} "
+                       f"step {r['step_idx'] + 1} due {r['due_at']}")
+    elif action == "cancel":
+        if not flow or not platform or not handle:
+            typer.echo("--flow, --platform and --handle are required.",
+                       err=True)
+            raise typer.Exit(1)
+        runner.cancel(flow, platform, handle)
+        typer.echo("Cancelled.")
+    else:
+        typer.echo(f"Unknown action {action!r}.", err=True)
+        raise typer.Exit(1)
+    runner.close()
+
+
+@chat_app.command("humanize")
+def chat_humanize(
+    text: str = typer.Option(..., "--text"),
+    typo: float = typer.Option(0.15, "--typo",
+                               help="Typo intensity 0.0-1.0."),
+    lowercase: bool = typer.Option(False, "--lowercase"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Preview the humanizer on a draft (typo simulation + tone fix)."""
+    from forge.chat.humanize import humanize
+    cfg = _cfg(config)
+    hcfg = dict(cfg.get_path("chat.humanize", {}) or {})
+    hcfg.update({"enabled": True, "typo_intensity": typo,
+                 "lowercase": lowercase})
+    typer.echo(humanize(text, hcfg))
+
+
+@chat_app.command("check")
+def chat_check(
+    text: str = typer.Option(..., "--text"),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Run the compliance checker on a draft (her wordlists)."""
+    from forge.chat.compliance import check_draft_text
+    cfg = _cfg(config)
+    findings = check_draft_text(
+        text, cfg.get_path("chat.compliance", {}) or {})
+    if not findings:
+        typer.echo("Clean -- no compliance flags.")
+        return
+    for f in findings:
+        typer.echo(f"[{f['category']}] {f['match']}: {f['detail']}")
+
+
+@chat_app.command("translate")
+def chat_translate(
+    text: str = typer.Option(..., "--text"),
+    target: str = typer.Option(..., "--target",
+                               help="Language code, e.g. es, de."),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Translate a draft via her LibreTranslate-compatible endpoint.
+
+    Basic machine translation -- review anything important.
+    """
+    from forge.chat.humanize import TranslationNotConfigured, translate
+    cfg = _cfg(config)
+    endpoint = str(cfg.get_path("chat.humanize.translate_endpoint", "")
+                   or "")
+    try:
+        typer.echo(translate(text, target, endpoint))
+    except TranslationNotConfigured as e:
+        typer.echo(f"NOT CONFIGURED: {e}", err=True)
+        raise typer.Exit(2)
+
+
+# -- post: mass DM -------------------------------------------------------------------
+@post_app.command("massdm")
+def post_massdm(
+    message: str = typer.Option(..., "--message",
+                                help="Template; {handle}/{first}/{spend}."),
+    platform: str = typer.Option(...,
+                                 help="Target platform for the packet."),
+    fan_list: str = typer.Option(..., "--list",
+                                 help="Smart list: whales/new/active/expired/quiet/online"),
+    exclude_recent: bool = typer.Option(True, "--exclude-recent/--include-recent",
+                                        help="Skip fans chatted in last 48h."),
+    live: bool = typer.Option(False, "--live",
+                              help="Write the packet. Default is dry-run."),
+    schedule: str = typer.Option("", "--schedule",
+                                 help="Also schedule a reminder, e.g. 2026-10-10T19:00."),
+    config: "str | None" = typer.Option(None, "--config"),
+):
+    """Build a smart mass-DM packet (manual-assist where no messaging API).
+
+    Dry-run by default: shows who would get it. --live writes the packet
+    with per-fan messages + checklist. Platforms without a messaging API
+    (OnlyFans/Fansly/Snapchat) are ALWAYS manual copy/paste.
+    """
+    from forge.post.massdm import build_mass_dm
+    cfg = _cfg(config)
+    crm = _crm(cfg)
+    try:
+        fans = crm.smart_list(fan_list, platform=platform)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    crm.close()
+    out_dir = cfg.get_path("post.packets_dir", "./forge-data/packets")
+    manifest = build_mass_dm(
+        message_template=message, fans=fans, platform=platform,
+        out_dir=out_dir, exclude_recently_chatted=exclude_recent,
+        dry_run=not live)
+    typer.echo(yaml.safe_dump(manifest, sort_keys=False))
+    if live and schedule:
+        from forge.post.schedule import Scheduler
+        s = Scheduler(cfg.get_path("post.schedule_db",
+                                   "./forge-data/schedule.db"))
+        entry = s.schedule(platform=platform, media_path="",
+                           caption=f"MASS-DM: {manifest['packet_dir']}",
+                           when=schedule,
+                           title=f"Mass-DM to {fan_list} ({platform})")
+        s.close()
+        typer.echo(f"Reminder scheduled: {entry['when']}")
+
+
+# -- analytics: LTV + peak times -------------------------------------------------------
+@analytics_app.command("ltv")
+def analytics_ltv(config: "str | None" = typer.Option(None, "--config")):
+    """LTV/ARPU from recorded earnings + CRM fan count (honest inputs)."""
+    from forge.analytics.insights import ltv_arpu, plain_english_summary
+    from forge.analytics.store import AnalyticsStore
+    cfg = _cfg(config)
+    astore = AnalyticsStore(cfg.get_path("analytics.db_path",
+                                         "./forge-data/analytics.db"))
+    totals = astore.totals()
+    astore.close()
+    crm = _crm(cfg)
+    fans = crm.list_fans(limit=100000)
+    spends = [f["total_spend"] for f in fans]
+    crm.close()
+    ltv = ltv_arpu(total_earnings=totals["total_earnings"],
+                   fan_count=len(fans), fan_spends=spends)
+    peaks = analytics_peak_times_list(cfg)
+    typer.echo(yaml.safe_dump(ltv, sort_keys=False))
+    typer.echo()
+    typer.echo(plain_english_summary(totals=totals, ltv=ltv, peaks=peaks))
+
+
+def analytics_peak_times_list(cfg) -> list:
+    from forge.analytics.insights import peak_posting_times
+    from forge.analytics.store import AnalyticsStore
+    astore = AnalyticsStore(cfg.get_path("analytics.db_path",
+                                         "./forge-data/analytics.db"))
+    stats = astore.post_stats(limit=1000)
+    astore.close()
+    return peak_posting_times(stats)
+
+
+@analytics_app.command("peak-times")
+def analytics_peak_times(config: "str | None" = typer.Option(None, "--config")):
+    """Best posting slots from HER recorded post stats."""
+    peaks = analytics_peak_times_list(_cfg(config))
+    for p in peaks:
+        typer.echo(f"{p['weekday']:3} {p['hour']:02d}:00  "
+                   f"avg engagement {p['avg_engagement']} "
+                   f"({p['posts']} posts)")
+    if peaks:
+        typer.echo(f"Note: {peaks[0]['note']}")
+
+
+# -- vault: labels + sent log ------------------------------------------------------------
+@vault_app.command("label")
+def vault_label_cmd(path: str = typer.Argument("./forge-data/vault"),
+                    name: str = typer.Option(..., "--name",
+                                             help="Blob name in the vault."),
+                    labels: str = typer.Option(..., "--labels",
+                                               help="Comma-separated labels."),
+                    password: "str | None" = typer.Option(None, "--password")):
+    """Set labels on a vault blob (encrypted, searchable)."""
+    v = _open_vault(path, password)
+    result = v.set_labels(name, [l.strip() for l in labels.split(",")])
+    typer.echo(f"Labels for '{name}': {', '.join(result)}")
+
+
+@vault_app.command("labels")
+def vault_labels_cmd(path: str = typer.Argument("./forge-data/vault"),
+                     name: str = typer.Option(..., "--name"),
+                     password: "str | None" = typer.Option(None, "--password")):
+    """Show a blob's labels."""
+    v = _open_vault(path, password)
+    typer.echo(", ".join(v.get_labels(name)) or "(no labels)")
+
+
+@vault_app.command("find-label")
+def vault_find_label_cmd(path: str = typer.Argument("./forge-data/vault"),
+                         label: str = typer.Option(..., "--label"),
+                         password: "str | None" = typer.Option(None, "--password")):
+    """List blobs with a label."""
+    v = _open_vault(path, password)
+    for b in v.blobs_by_label(label):
+        typer.echo(b)
+
+
+@vault_app.command("search")
+def vault_search_cmd(path: str = typer.Argument("./forge-data/vault"),
+                     query: str = typer.Option(..., "--query"),
+                     password: "str | None" = typer.Option(None, "--password")):
+    """Search vault blob names + labels."""
+    v = _open_vault(path, password)
+    for hit in v.search(query):
+        typer.echo(f"{hit['blob']}  [{', '.join(hit['labels'])}]")
+
+
+@vault_app.command("sent")
+def vault_sent_cmd(path: str = typer.Argument("./forge-data/vault"),
+                   name: str = typer.Option(..., "--name",
+                                            help="Blob that was sent."),
+                   fan: str = typer.Option(..., "--fan",
+                                           help="Fan handle it went to."),
+                   password: "str | None" = typer.Option(None, "--password")):
+    """Log that a blob was sent to a fan (no-resend guard)."""
+    v = _open_vault(path, password)
+    fans = v.log_sent(name, fan)
+    typer.echo(f"'{name}' sent to: {', '.join(fans)}")
+
+
+@vault_app.command("sent-log")
+def vault_sent_log_cmd(path: str = typer.Argument("./forge-data/vault"),
+                       name: str = typer.Option(..., "--name"),
+                       password: "str | None" = typer.Option(None, "--password")):
+    """Show who already got a blob."""
+    v = _open_vault(path, password)
+    fans = v.sent_to(name)
+    typer.echo(", ".join(fans) if fans else "(nobody yet)")
+
+
+@vault_app.command("check-sent")
+def vault_check_sent_cmd(path: str = typer.Argument("./forge-data/vault"),
+                         name: str = typer.Option(..., "--name"),
+                         fan: str = typer.Option(..., "--fan"),
+                         password: "str | None" = typer.Option(None, "--password")):
+    """Check whether a fan already got a blob (avoid double-sending PPV)."""
+    v = _open_vault(path, password)
+    if v.already_sent(name, fan):
+        typer.echo(f"YES -- {fan} already got '{name}'. Don't resend.")
+    else:
+        typer.echo(f"No -- {fan} hasn't gotten '{name}' yet.")
 
 
 if __name__ == "__main__":

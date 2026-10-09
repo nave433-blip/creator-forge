@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=CreatorForge
+Comment=AI creator-assistant: catalog, persona video, chat bots, payments
+Exec=forge gui
+Icon=creatorforge
+Terminal=false
+Type=Application
+Categories=AudioVideo;Graphics;
+Keywords=creator;ai;video;assistant;
+StartupNotify=true

@@ -151,3 +151,89 @@ def consent_summary(pack: dict[str, Any]) -> str:
         f"Consent signed by {c['signer']} on {c['date']} | "
         f"Scope: {c['scope']}"
     )
+
+
+# -- multi-persona -----------------------------------------------------------
+# She can keep more than one identity pack (e.g. one per persona she
+# runs). Packs live in a directory (identity.packs_dir in forge.yaml,
+# default ./identity-packs); one of them is "active" and used when a
+# command doesn't get an explicit --pack.
+
+
+def list_packs(packs_dir: str | Path) -> list[dict[str, Any]]:
+    """List identity packs in a directory with their validation status."""
+    d = Path(packs_dir)
+    packs: list[dict[str, Any]] = []
+    if not d.is_dir():
+        return packs
+    for f in sorted(d.glob("*.yaml")) + sorted(d.glob("*.yml")):
+        try:
+            pack = validate_identity_pack(load_identity_pack(f))
+            packs.append({"path": str(f), "name": pack.get("name"),
+                          "version": pack.get("version", 1),
+                          "status": "valid"})
+        except InvalidConsentError as e:
+            packs.append({"path": str(f), "name": f.stem,
+                          "version": None, "status": f"INVALID: {e}"})
+        except Exception as e:  # unreadable file: report, don't crash
+            packs.append({"path": str(f), "name": f.stem,
+                          "version": None, "status": f"unreadable: {e}"})
+    return packs
+
+
+def active_pack_file(data_dir: str | Path) -> Path:
+    """Path of the tiny file recording which pack is active."""
+    d = Path(data_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "active-pack.txt"
+
+
+def set_active_pack(pack_path: str | Path, data_dir: str | Path) -> str:
+    """Make a pack the active one (validates it first). Returns its path."""
+    pack = validate_identity_pack(load_identity_pack(pack_path))
+    target = active_pack_file(data_dir)
+    target.write_text(str(Path(pack_path).resolve()), encoding="utf-8")
+    return str(Path(pack_path).resolve())
+
+
+def get_active_pack(data_dir: str | Path) -> str | None:
+    """Return the active pack path, or None if none is set."""
+    f = Path(data_dir) / "active-pack.txt"
+    if not f.is_file():
+        return None
+    p = f.read_text(encoding="utf-8").strip()
+    return p or None
+
+
+def resolve_pack_path(explicit: str | None, config: Any,
+                      data_dir: str | Path | None = None) -> str | None:
+    """Pick the identity pack to use: explicit --pack wins, then the
+    active pack, then identity.pack_path from config."""
+    if explicit:
+        return explicit
+    data_dir = data_dir or config.get_path("data_dir", "./forge-data")
+    active = get_active_pack(data_dir)
+    if active:
+        return active
+    return config.get_path("identity.pack_path")
+
+
+def bump_pack_version(pack_path: str | Path, notes: str = "") -> Path:
+    """Create a new versioned copy of a pack (v1 -> v2, ...).
+
+    The old file is untouched; the new file is validated before being
+    written. Use this when consent terms change or she wants a clean
+    revision history per persona.
+    """
+    src = Path(pack_path)
+    pack = validate_identity_pack(load_identity_pack(src))
+    new_version = int(pack.get("version", 1)) + 1
+    pack["version"] = new_version
+    pack["version_notes"] = notes
+    pack["versioned_at"] = __import__("datetime").date.today().isoformat()
+    stem = src.stem
+    # strip an existing -vN suffix so we don't accumulate them
+    import re
+    stem = re.sub(r"-v\d+$", "", stem)
+    dest = src.with_name(f"{stem}-v{new_version}{src.suffix}")
+    return write_identity_pack(pack, dest)

@@ -54,6 +54,52 @@ def video_duration(path: Path) -> float | None:
         return None
 
 
+def scan_one_file(
+    path: str | Path,
+    store: CatalogStore,
+    *,
+    tags: list[str] | None = None,
+    notes: str = "",
+) -> int | None:
+    """Insert a single media file into ``store`` (dedupes by hash).
+
+    Returns the new item id, or ``None`` if the file is a duplicate or
+    an unsupported type.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return None
+    suffix = path.suffix.lower()
+    kind: str | None = None
+    if suffix in IMAGE_EXTS:
+        kind = "image"
+    elif suffix in VIDEO_EXTS:
+        kind = "video"
+    if kind is None:
+        return None
+    digest = sha256_of(path)
+    if store.find_by_hash(digest):
+        return None
+    mime, _ = mimetypes.guess_type(path.name)
+    width = height = None
+    duration = None
+    if kind == "image":
+        width, height = image_dimensions(path)
+    else:
+        duration = video_duration(path)
+    return store.add_item(
+        path=str(path.resolve()),
+        sha256=digest,
+        kind=kind,
+        mime=mime or "application/octet-stream",
+        width=width,
+        height=height,
+        duration=duration,
+        tags=tags or [],
+        notes=notes,
+    )
+
+
 def scan_directory(
     root: str | Path,
     store: CatalogStore,

@@ -62,6 +62,8 @@ class Draft:
     status: str = "pending"  # pending | approved | rejected | sent
     created_at: float = field(default_factory=time.time)
     decided_at: float | None = None
+    escalated: bool = False  # True if escalation lexicon flagged it
+    escalation_categories: list[str] = field(default_factory=list)
 
 
 class ApprovalQueue:
@@ -164,6 +166,9 @@ class RuleEngine:
         self.conversation_modes: dict[tuple[str, str], str] = {}
         # Messages seen in "manual" mode (bot stays silent, human handles).
         self.seen: list[dict] = []
+        # Optional config object used by the escalation lexicon
+        # (chat.escalation in forge.yaml). Set by the CLI/dashboard.
+        self.escalation_config: Any = None
 
     def set_conversation_mode(self, platform: str, sender: str,
                               mode: str) -> None:
@@ -256,6 +261,38 @@ class RuleEngine:
         draft = self.queue.add(platform=platform, sender=sender,
                                incoming=text, reply=reply,
                                trigger=trigger_name)
+        # Escalation check: keyword lexicon only (no ML claims). Flagged
+        # drafts show up highlighted so a human handles them.
+        try:
+            from forge.chat.escalation import analyze as _analyze
+            esc = _analyze(text, self.escalation_config)
+            draft.escalated = esc["escalated"]
+            draft.escalation_categories = esc["categories"]
+        except Exception:
+            pass  # escalation is advisory; never break drafting
         if mode == "auto" or platform in self.auto_send_platforms:
             self.queue.approve(draft.id)
         return draft
+
+
+def build_tip_menu_trigger(config: Any) -> "Trigger | None":
+    """Build an optional trigger that answers tip-menu questions.
+
+    Enabled with ``chat.tip_menu_replies: true`` in forge.yaml. The reply
+    lists her configured tip menu items from ``pay.tip_menu``. Plain
+    keyword matching -- it fires when the message mentions tip/menu/price.
+    """
+    try:
+        enabled = config.get_path("chat.tip_menu_replies", False)
+        menu = config.get_path("pay.tip_menu", []) or []
+    except Exception:
+        return None
+    if not enabled or not menu:
+        return None
+    lines = [f"- {item.get('label')}: {item.get('price', '')}".strip()
+             for item in menu if isinstance(item, dict)]
+    reply = ("Here's my tip menu babe 💕\n" + "\n".join(lines)
+             + "\nJust say which one and I'll set it up!")
+    return Trigger(name="tip-menu",
+                   pattern=r"\b(tip|menu|price|prices|cost|how much)\b",
+                   reply_template=reply)

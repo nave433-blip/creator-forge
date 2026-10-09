@@ -8,6 +8,11 @@
 | TikTok / Instagram | Posting packets + calendar | `forge post packet` | Official posting APIs are limited/partner-only; not included |
 | Discord / Telegram / Zapier | Send via incoming webhook | `forge post/webhook.py`, `platforms.webhook_url` | Anything beyond what the webhook accepts |
 | Chat/inbox (any platform) | Draft replies into an approval queue; human approves | `forge chat draft/approve/sent`, dashboard queue | Auto-send is OFF by default. Opt-in per platform with a warning; you are responsible for ToS compliance |
+| Spicy chat (flirty/dirty-talk) | Tiered reply templates + rates/tip monetization flows, approval-queued | `forge chat spicy-*`, Spicy mobile tab | **Consent-gated**: needs spicy scope in her identity pack. Explicit tier ships empty -- she writes it. Bot never escalates tiers alone; spicy drafts are never auto-approved |
+| Incoming pic triage | Blurred-thumbnail queue, one-tap approve/skip, drafted auto-reply | `forge chat triage-*`, Triage mobile tab | NOT AI vision -- pre-screening assistance only. Optional NSFW classifier adapter interface; none configured by default |
+| HeyGen / D-ID live avatar | REAL streaming-avatar sessions via their APIs | `forge live start --provider heygen\|did` | Needs YOUR paid API key. Never simulated. WebRTC client needed to view/drive the stream |
+| OBS virtual camera (free) | Looped talking-head clip as a fake webcam w/ green-screen option | `forge live start --provider local-guide`, docs/LIVE.md | Looped clip, not reactive. Can't hold a conversation |
+| VoIP (TextNow etc.) | Call checklist + session logging; optional AI-voice intros via her cloned voice | docs/LIVE.md | Manual phone apps -- CreatorForge cannot automate them; automation claims would be lies |
 
 ## Chat bot honesty
 
@@ -20,3 +25,20 @@
 - Keyword triggers are dumb pattern matches, not intelligence. Review
   drafts before approving -- especially anything about prices, customs,
   or boundaries.
+
+## Spicy livestream platforms (AFK avatar)
+
+| Platform | What works | CreatorForge does | Won't do / risk |
+|---|---|---|---|
+| Chaturbate | RTMP ingest via OBS; official Apps & Bots API for tip apps | Session tracking, avatar pipeline, setup guide | AFK avatar = **HIGH ban risk**; expects live performer |
+| Stripchat | RTMP ingest via OBS | Session tracking, setup guide | No chat API (manual chat); AFK avatar = **HIGH ban risk** |
+| BongaCams | RTMP ingest via OBS | Session tracking, setup guide | No chat API; AFK avatar = **HIGH ban risk** |
+| CamSoda | RTMP ingest via OBS | Session tracking, setup guide | No chat API; AFK avatar = **HIGH ban risk** |
+| ManyVids (MV Live) | RTMP ingest via OBS | Session tracking, setup guide | No chat API; AFK avatar = **MEDIUM-HIGH risk** |
+| MyFreeCams | RTMP ingest via OBS | Session tracking, setup guide | No chat API; AFK avatar = **HIGH ban risk** |
+| Fansly Live | RTMP ingest | Session tracking, setup guide | No API; **MEDIUM** (own account, gray area) |
+| OnlyFans Live | Via creator dashboard | Session tracking, setup guide | No API; **MEDIUM** (own account, gray area) |
+
+Details + per-platform setup: docs/STREAMING.md. `forge stream go-live`
+requires her explicit ToS-risk confirmation; CreatorForge cannot protect
+the account.
