@@ -98,6 +98,15 @@ Privacy: no real names appear in this repo, including here.
   access that gets accounts banned. CreatorForge stays manual-assist +
   approval-gated here permanently. Documented in `docs/PLATFORMS.md`.
 
+### 11. Telegram bot token — HER
+- **She does:** message @BotFather on Telegram, create a bot, paste the
+  token into `forge.yaml` under `telegram:` (or `TELEGRAM_BOT_TOKEN`).
+  Add the bot as admin to her channel (or use a numeric chat id).
+- **Until then:** `forge telegram ...` prints a clean one-line setup
+  error pointing at @BotFather.
+- **Honest scope:** the Bot API sends announcements/media drops. It does
+  not do Telegram Stars payouts or read fan DMs.
+
 ---
 
 ## Sourcing log (OSS borrowed or evaluated)
@@ -112,6 +121,7 @@ Privacy: no real names appear in this repo, including here.
 | Local AI drafts | Built from scratch (`forge/ai/local.py`) | — | Zero-dependency template engine was the right call; no OSS micro-lib needed. Ollama (MIT) noted above as the future upgrade path. |
 | Translator backend | Not vendored | AGPL-3.0 (LibreTranslate) | Flagged in §9 for his call per the GPL rule |
 | Promo-link tracking | Built from scratch (`forge/promo/tracker.py`) | — | Evaluated OSS: none worth borrowing — UTM tagging is `urllib.parse`, storage is sqlite; a micro-dependency would add risk for ~150 lines. |
+| Telegram bot adapter | Built thin on httpx (`forge/telegram/bot.py`) | httpx: BSD | Evaluated the established OSS lib python-telegram-bot — it is **LGPL-3.0**. For this narrow send-only surface the thin adapter avoids the license question and keeps deps light. Revisit with his explicit call if a full conversational bot is ever wanted. |
 
 ## License hygiene
 - `pyproject.toml` pins third-party deps; their licenses ship with them.

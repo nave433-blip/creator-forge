@@ -696,6 +696,81 @@ connect_app = typer.Typer(help="Platform connector commands.",
                            no_args_is_help=True)
 app.add_typer(connect_app, name="connect")
 
+# -- telegram (bot announcements + media drops) ----------------------------
+telegram_app = typer.Typer(help="Telegram bot: channel announcements.",
+                           no_args_is_help=True)
+app.add_typer(telegram_app, name="telegram")
+
+
+def _telegram_bot(cfg, token: Optional[str] = None):
+    from forge.telegram.bot import TelegramBot, resolve_token
+    tok = resolve_token(token or cfg.get_path("telegram.bot_token", ""))
+    return TelegramBot(tok)
+
+
+def _telegram_chat(cfg, chat: Optional[str]) -> str:
+    cid = chat or cfg.get_path("telegram.default_chat_id", "")
+    if not cid:
+        raise ValueError(
+            "No chat: pass --chat or set telegram.default_chat_id "
+            "(channel @name or numeric chat id).")
+    return str(cid)
+
+
+@telegram_app.command("status")
+def telegram_status(
+    token: Optional[str] = typer.Option(None, "--token"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Validate the bot token (getMe). No token = clean setup error."""
+    cfg = _cfg(config)
+    me = _telegram_bot(cfg, token).status()
+    typer.echo(f"Bot OK: @{me.get('username')} ({me.get('first_name')})")
+
+
+@telegram_app.command("send")
+def telegram_send(
+    text: str = typer.Option(..., "--text"),
+    chat: Optional[str] = typer.Option(None, "--chat"),
+    token: Optional[str] = typer.Option(None, "--token"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Send a text announcement to a chat/channel via her bot."""
+    cfg = _cfg(config)
+    chat_id = _telegram_chat(cfg, chat)
+    msg = _telegram_bot(cfg, token).send_message(chat_id, text)
+    typer.echo(f"Sent (message {msg.get('message_id')}).")
+
+
+@telegram_app.command("send-photo")
+def telegram_send_photo(
+    photo: str = typer.Option(..., "--photo"),
+    caption: str = typer.Option("", "--caption"),
+    chat: Optional[str] = typer.Option(None, "--chat"),
+    token: Optional[str] = typer.Option(None, "--token"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Send a photo drop to a chat/channel via her bot."""
+    cfg = _cfg(config)
+    chat_id = _telegram_chat(cfg, chat)
+    msg = _telegram_bot(cfg, token).send_photo(chat_id, photo, caption)
+    typer.echo(f"Photo sent (message {msg.get('message_id')}).")
+
+
+@telegram_app.command("send-video")
+def telegram_send_video(
+    video: str = typer.Option(..., "--video"),
+    caption: str = typer.Option("", "--caption"),
+    chat: Optional[str] = typer.Option(None, "--chat"),
+    token: Optional[str] = typer.Option(None, "--token"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Send a video drop to a chat/channel via her bot (<=50MB)."""
+    cfg = _cfg(config)
+    chat_id = _telegram_chat(cfg, chat)
+    msg = _telegram_bot(cfg, token).send_video(chat_id, video, caption)
+    typer.echo(f"Video sent (message {msg.get('message_id')}).")
+
 
 @connect_app.command("list")
 def connect_list(csv_out: Optional[str] = typer.Option(None, "--csv")):

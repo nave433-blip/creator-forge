@@ -172,6 +172,10 @@ limits of each. If a feature isn't listed here, it doesn't exist.
   - Snapchat / TikTok: manual-assist posting only.
   - Filesystem / URL: full import.
 - `forge connect import --platform … --source …`
+- **Telegram bot** (`forge telegram status|send|send-photo|send-video`) --
+  her bot posts announcements and media drops to her channel/chat.
+  Needs a bot token from @BotFather (see `PLACEHOLDERS.md`); clean error
+  without one. Honest scope: no Stars payouts, no DM automation.
 
 ## Skills (plugins)
 
