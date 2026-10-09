@@ -622,3 +622,26 @@ export const getAIProviders = (s: BackendSettings) =>
 
 export const aiAsk = (s: BackendSettings, body: Record<string, unknown>) =>
   apiPost<AIAnswer>(s, '/ai/ask', { body: JSON.stringify(body) });
+
+export interface PromoLink {
+  id: number;
+  code: string;
+  base_url: string;
+  full_url: string;
+  campaign: string;
+  source: string;
+  medium: string;
+  notes: string;
+}
+
+export interface PromoCampaign {
+  campaign: string;
+  links: number;
+  earnings: number;
+}
+
+export const getPromoLinks = (s: BackendSettings) =>
+  apiGet<{ links: PromoLink[] }>(s, '/promo/links');
+
+export const getPromoReport = (s: BackendSettings) =>
+  apiGet<{ campaigns: PromoCampaign[] }>(s, '/promo/report');
