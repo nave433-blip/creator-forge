@@ -107,6 +107,15 @@ sites require verified real broadcasters, the app makes you confirm you
 understand the risk before going live, and the setup guide walks through
 each site's rules honestly.
 
+**Telegram announcements:** if you run a Telegram channel, the app can
+post text/photo/video drops to it through your own bot (you create the
+bot with @BotFather — takes two minutes). It can't do Telegram Stars
+payouts or read your DMs; it's just your announcement helper.
+
+**Promo links:** doing a shoutout or collab? The app makes you a special
+tracked link for it, and you log what it earned — then it tells you
+which shoutouts actually paid off.
+
 ## 7. Get paid, your way
 
 One command shows all your payment links — Venmo, Cash App, PayPal,
