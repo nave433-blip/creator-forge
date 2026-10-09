@@ -229,9 +229,13 @@ Auto-discovered from `forge/skills/builtin/` + `skills.paths`:
   writing help; everything returned is a **draft** for her review.
 - `forge ai reply-assist --incoming "..."` -- two reply options; add
   `--platform` + `--sender` to drop it in the approval queue.
+- **No keys yet?** Add `--local` to any of the above (except `ask`):
+  free template-based drafts assembled from her word bank, honestly
+  labeled `local template draft (not AI-generated)` -- a working
+  replacement until she adds keys (see `PLACEHOLDERS.md`).
 - Needs HER paid API keys (`ai:` in forge.yaml or XAI_API_KEY /
-  GEMINI_API_KEY / ANTHROPIC_API_KEY). No key = clear setup error,
-  never a fake answer. Full doc: `docs/AI.md`.
+  GEMINI_API_KEY / ANTHROPIC_API_KEY). No key = clean setup error that
+  points at `--local`, never a fake answer. Full doc: `docs/AI.md`.
 
 ## Mobile (Android)
 

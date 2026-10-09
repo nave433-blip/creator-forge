@@ -1626,6 +1626,37 @@ def _ai_provider(provider: Optional[str], cfg):
     return resolve_provider(provider, cfg)
 
 
+def _ai_or_local(provider: Optional[str], cfg, local: bool):
+    """Resolve an AI provider, or None when --local was passed.
+
+    When no key is configured the error now points at the free fallback
+    instead of being a dead end (see PLACEHOLDERS.md).
+    """
+    if local:
+        return None
+    prov = _ai_provider(provider, cfg)
+    if not prov.is_configured():
+        from forge.ai.providers import AINotConfiguredError
+        env = " or ".join(prov.env_vars)
+        raise AINotConfiguredError(
+            f"{prov.key} is not configured: set ai.{prov.key}_api_key in "
+            f"forge.yaml or the {env} environment variable. "
+            f"Get a key: {prov.docs_url}  "
+            f"Tip: retry with --local for free template-based drafts "
+            f"(honestly labeled, not AI).")
+    return prov
+
+
+def _local_tag_echo():
+    from forge.ai.local import LOCAL_TAG
+    typer.echo(f"[{LOCAL_TAG}]")
+
+
+_LOCAL_OPT = typer.Option(
+    False, "--local",
+    help="Free local template drafts (no AI key needed; honestly labeled).")
+
+
 @ai_app.command("providers")
 def ai_providers(config: Optional[str] = typer.Option(None, "--config")):
     """Show AI providers and whether each has a key configured."""
@@ -1645,10 +1676,16 @@ def ai_ask(
     provider: Optional[str] = typer.Option(None, "--provider",
                                            help="grok|gemini|claude"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Ask the AI anything. Prints the answer (draft, not sent anywhere)."""
+    if local:
+        raise ValueError(
+            "--local can't answer free-form questions; it only does "
+            "template-based caption/title/hashtag/idea/promo drafts. "
+            "Add an AI provider key to use 'ask'.")
     from forge.ai.tasks import ask
-    resp = ask(_ai_provider(provider, _cfg(config)), prompt)
+    resp = ask(_ai_or_local(provider, _cfg(config), local), prompt)
     typer.echo(f"[{resp.provider}/{resp.model}]\n{resp.text}")
 
 
@@ -1659,10 +1696,20 @@ def ai_caption(
     tone: str = typer.Option("playful", "--tone"),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Write social captions about a topic."""
+    cfg = _cfg(config)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        for c in local_ai.local_captions(topic, n=n, tone=tone,
+                                         lex=_load_lexicon(cfg)):
+            typer.echo(f"- {c}")
+        return
     from forge.ai.tasks import captions
-    resp = captions(_ai_provider(provider, _cfg(config)), topic, n, tone)
+    resp = captions(prov, topic, n, tone)
     typer.echo(resp.text)
 
 
@@ -1672,10 +1719,19 @@ def ai_titles(
     n: int = typer.Option(5, "--n"),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Brainstorm video titles."""
+    cfg = _cfg(config)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        for t in local_ai.local_titles(topic, n=n, lex=_load_lexicon(cfg)):
+            typer.echo(f"- {t}")
+        return
     from forge.ai.tasks import titles
-    typer.echo(titles(_ai_provider(provider, _cfg(config)), topic, n).text)
+    typer.echo(titles(prov, topic, n).text)
 
 
 @ai_app.command("hashtags")
@@ -1684,10 +1740,18 @@ def ai_hashtags(
     n: int = typer.Option(10, "--n"),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Suggest hashtags for a topic."""
+    cfg = _cfg(config)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        typer.echo(" ".join(local_ai.local_hashtags(topic, n=n)))
+        return
     from forge.ai.tasks import hashtags
-    typer.echo(hashtags(_ai_provider(provider, _cfg(config)), topic, n).text)
+    typer.echo(hashtags(prov, topic, n).text)
 
 
 @ai_app.command("ideas")
@@ -1696,11 +1760,20 @@ def ai_ideas(
     n: int = typer.Option(10, "--n"),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Brainstorm video content ideas for her niche."""
+    cfg = _cfg(config)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        for idea in local_ai.local_content_ideas(niche, n=n,
+                                                 lex=_load_lexicon(cfg)):
+            typer.echo(f"- {idea}")
+        return
     from forge.ai.tasks import content_ideas
-    typer.echo(content_ideas(_ai_provider(provider, _cfg(config)),
-                             niche, n).text)
+    typer.echo(content_ideas(prov, niche, n).text)
 
 
 @ai_app.command("scene-ideas")
@@ -1709,11 +1782,19 @@ def ai_scene_ideas(
     n: int = typer.Option(5, "--n"),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Describe filmable AI-video scene concepts for a vibe."""
+    cfg = _cfg(config)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        for s in local_ai.local_scene_ideas(vibe, n=n, lex=_load_lexicon(cfg)):
+            typer.echo(f"- {s}")
+        return
     from forge.ai.tasks import scene_ideas
-    typer.echo(scene_ideas(_ai_provider(provider, _cfg(config)),
-                           vibe, n).text)
+    typer.echo(scene_ideas(prov, vibe, n).text)
 
 
 @ai_app.command("polish")
@@ -1721,10 +1802,18 @@ def ai_polish(
     text: str = typer.Option(...),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Rewrite her draft punchier, keeping her voice."""
+    cfg = _cfg(config)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        typer.echo(local_ai.local_polish(text))
+        return
     from forge.ai.tasks import polish
-    typer.echo(polish(_ai_provider(provider, _cfg(config)), text).text)
+    typer.echo(polish(prov, text).text)
 
 
 @ai_app.command("reply-assist")
@@ -1736,23 +1825,31 @@ def ai_reply_assist(
     sender: Optional[str] = typer.Option(None, "--sender"),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Draft reply options for a fan message.
 
     With --platform and --sender, the draft goes into the approval queue;
     otherwise it's just printed.
     """
-    from forge.ai.tasks import reply_assist
     cfg = _cfg(config)
-    resp = reply_assist(_ai_provider(provider, cfg), incoming, context)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        text = "\n---\n".join(
+            local_ai.local_reply_options(incoming, lex=_load_lexicon(cfg)))
+    else:
+        from forge.ai.tasks import reply_assist
+        text = reply_assist(prov, incoming, context).text
     if platform and sender:
         engine = _load_engine(cfg)
         draft = engine.queue.add(platform=platform, sender=sender,
-                                 incoming=incoming, reply=resp.text,
+                                 incoming=incoming, reply=text,
                                  trigger="ai-assist")
         _save_engine_queue(engine)
         typer.echo(f"Draft #{draft.id} queued for approval:")
-    typer.echo(resp.text)
+    typer.echo(text)
 
 
 @ai_app.command("promo")
@@ -1761,11 +1858,18 @@ def ai_promo(
     price: str = typer.Option(...),
     provider: Optional[str] = typer.Option(None, "--provider"),
     config: Optional[str] = typer.Option(None, "--config"),
+    local: bool = _LOCAL_OPT,
 ):
     """Write promo lines for a menu item at her price."""
+    cfg = _cfg(config)
+    prov = _ai_or_local(provider, cfg, local)
+    if prov is None:
+        from forge.ai import local as local_ai
+        _local_tag_echo()
+        typer.echo(local_ai.local_promo(item, price, lex=_load_lexicon(cfg)))
+        return
     from forge.ai.tasks import promo_text
-    typer.echo(promo_text(_ai_provider(provider, _cfg(config)),
-                          item, price).text)
+    typer.echo(promo_text(prov, item, price).text)
 
 
 # -- dashboard ---------------------------------------------------------------
