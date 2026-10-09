@@ -1461,6 +1461,122 @@ def import_profile_cmd(
                "then run `forge identity validate`.")
 
 
+# -- tube sites (manual-assist uploads) ------------------------------------------
+tube_app = typer.Typer(help="Tube-site upload packets (manual-assist).",
+                       no_args_is_help=True)
+app.add_typer(tube_app, name="tube")
+
+
+@tube_app.command("sites")
+def tube_sites():
+    """List tube sites and their honest upload capabilities."""
+    from forge.tube.sites import capability_rows
+    typer.echo(f"{'site':10} {'upload':8} {'verification':14} monetization")
+    typer.echo("-" * 70)
+    for r in capability_rows():
+        typer.echo(f"{r['site']:10} {r['upload']:8} {r['verification']:14} "
+                   f"{r['monetization']}")
+    typer.echo("\nAll tube sites are MANUAL upload: she posts in the site's "
+               "own dashboard. No public upload API exists -- tools claiming "
+               "auto-upload get accounts banned.")
+
+
+@tube_app.command("metadata")
+def tube_metadata(
+    site: str = typer.Option(..., help="pornhub|xvideos|xnxx|xhamster|redtube|youporn"),
+    scene: Optional[str] = typer.Option(None, "--scene", help="Scene YAML file."),
+    name: str = typer.Option("", "--name", help="Her display name for titles."),
+    tags: str = typer.Option("", "--tags", help="Comma-separated custom tags."),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Preview title/description/tags for one site (nothing is posted)."""
+    import yaml as _yaml
+    from forge.pay.links import build_payment_links
+    from forge.tube.metadata import generate_metadata
+    from forge.tube.sites import get_site
+    cfg = _cfg(config)
+    scene_data = (_yaml.safe_load(Path(scene).read_text(encoding="utf-8"))
+                  if scene else None) or {}
+    try:
+        tube_site = get_site(site)
+    except KeyError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    meta = generate_metadata(
+        tube_site, scene_data, name=name,
+        custom_tags=[t.strip() for t in tags.split(",") if t.strip()],
+        links=build_payment_links(cfg))
+    typer.echo(f"TITLE ({len(meta.title)} chars):\n  {meta.title}\n")
+    typer.echo(f"DESCRIPTION:\n{meta.description}\n")
+    typer.echo(f"TAGS ({len(meta.tags)}/{tube_site.max_tags}): "
+               f"{', '.join(meta.tags)}")
+
+
+@tube_app.command("packet")
+def tube_packet(
+    video: str = typer.Option(..., "--video", help="Video file path."),
+    site: str = typer.Option(..., help="pornhub|xvideos|xnxx|xhamster|redtube|youporn"),
+    scene: Optional[str] = typer.Option(None, "--scene"),
+    name: str = typer.Option("", "--name"),
+    tags: str = typer.Option("", "--tags"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Build an upload packet (title/description/tags/checklist) for one video."""
+    from forge.pay.links import build_payment_links
+    from forge.tube.packets import build_packet
+    from forge.tube.sites import get_site
+    import yaml as _yaml
+    cfg = _cfg(config)
+    scene_data = (_yaml.safe_load(Path(scene).read_text(encoding="utf-8"))
+                  if scene else None) or {}
+    try:
+        tube_site = get_site(site)
+    except KeyError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    out = cfg.get_path("post.packets_dir", "./forge-data/packets")
+    dest = build_packet(
+        video, tube_site, out, scene=scene_data, name=name,
+        custom_tags=[t.strip() for t in tags.split(",") if t.strip()],
+        links=build_payment_links(cfg))
+    typer.echo(f"Packet ready at {dest}")
+    typer.echo("Copy title/description/tags into the site's upload page, "
+               "then publish there.")
+
+
+@tube_app.command("bulk")
+def tube_bulk(
+    dir: str = typer.Option(..., "--dir", help="Folder of videos."),
+    sites: str = typer.Option("pornhub,xvideos,xnxx,xhamster,redtube,youporn",
+                              "--sites", help="Comma-separated site keys."),
+    scene: Optional[str] = typer.Option(None, "--scene"),
+    name: str = typer.Option("", "--name"),
+    tags: str = typer.Option("", "--tags"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Build upload packets for a whole folder of videos across many sites."""
+    from forge.pay.links import build_payment_links
+    from forge.tube.packets import build_bulk
+    import yaml as _yaml
+    cfg = _cfg(config)
+    scene_data = (_yaml.safe_load(Path(scene).read_text(encoding="utf-8"))
+                  if scene else None) or {}
+    vids = sorted(str(p) for p in Path(dir).glob("*")
+                  if p.suffix.lower() in (".mp4", ".mov", ".webm", ".m4v"))
+    if not vids:
+        typer.echo(f"No videos found in {dir}", err=True)
+        raise typer.Exit(1)
+    out = cfg.get_path("post.packets_dir", "./forge-data/packets")
+    manifest = build_bulk(
+        vids, [s.strip() for s in sites.split(",") if s.strip()], out,
+        scene=scene_data, name=name,
+        custom_tags=[t.strip() for t in tags.split(",") if t.strip()],
+        links=build_payment_links(cfg))
+    typer.echo(f"{len(vids)} video(s) x packets ready. Manifest: {manifest}")
+    typer.echo("Work through the packets site by site -- she publishes "
+               "each one in the site's own dashboard.")
+
+
 # -- dashboard ---------------------------------------------------------------
 @app.command()
 def dashboard(config: Optional[str] = typer.Option(None, "--config"),

@@ -13,6 +13,27 @@
 | HeyGen / D-ID live avatar | REAL streaming-avatar sessions via their APIs | `forge live start --provider heygen\|did` | Needs YOUR paid API key. Never simulated. WebRTC client needed to view/drive the stream |
 | OBS virtual camera (free) | Looped talking-head clip as a fake webcam w/ green-screen option | `forge live start --provider local-guide`, docs/LIVE.md | Looped clip, not reactive. Can't hold a conversation |
 | VoIP (TextNow etc.) | Call checklist + session logging; optional AI-voice intros via her cloned voice | docs/LIVE.md | Manual phone apps -- CreatorForge cannot automate them; automation claims would be lies |
+| Tube sites: Pornhub, XVideos, XNXX, xHamster, RedTube, YouPorn | Upload packets: per-site title, description, auto-tags + step-by-step checklist; bulk packets for folders x sites | `forge tube packet` / `forge tube bulk`, `/tube/*` endpoints | **No auto-upload -- none of these sites offer a public upload API** (verified 2026-10-09). She publishes in each site's own dashboard from a verified account; automation tools get accounts banned |
+
+## Tube-site uploads (honest breakdown)
+
+Verified 2026-10-09: none of the major tubes offer a public upload API
+for regular creators. Pornhub only accepts uploads from verified Model
+Program / content partners; xHamster only from verified members or
+producers. "Auto-upload" third-party tools are ban bait.
+
+So `forge tube` doesn't pretend to post for her -- it does the part
+that actually eats her time: per-site titles, descriptions, and
+auto-tags, plus a checklist for each site's own upload page.
+
+| Site | Upload | Verified account? | Tag limit | Pays via |
+|---|---|---|---|---|
+| Pornhub | manual dashboard | yes (Model Program) | 20 | ad-revenue share |
+| XVideos | manual dashboard | yes | 15 | per-view partner program |
+| XNXX | manual dashboard | yes | 15 | per-view partner program |
+| xHamster | manual dashboard | yes (members/producers) | 10 | ad-revenue share |
+| RedTube | manual dashboard | yes | 20 | partner revenue share |
+| YouPorn | manual dashboard | yes | 20 | partner revenue share |
 
 ## Chat bot honesty
 

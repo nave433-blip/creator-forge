@@ -202,6 +202,20 @@ Auto-discovered from `forge/skills/builtin/` + `skills.paths`:
   secrets separately).
 - `forge import-profile` -- unpack on a new machine.
 
+## Tube sites (manual-assist uploads)
+
+- `forge tube sites` -- honest capability matrix (all manual; verified
+  accounts required; none offer a public upload API).
+- `forge tube metadata --site pornhub` -- preview title/description/tags.
+- `forge tube packet --video clip.mp4 --site xvideos` -- one upload
+  packet: title.txt, description.txt, tags.txt, checklist.md with the
+  site's upload URL and tips.
+- `forge tube bulk --dir ./clips --sites pornhub,xvideos,xnxx` --
+  packets for a whole folder x many sites + manifest CSV.
+- Metadata engine: title templates (per-site length limits), descriptions
+  with her payment links baked in, auto-tags (her custom tags > catalog
+  tags > curated taxonomy matched from the scene), per-site tag limits.
+
 ## Mobile (Android)
 
 Expo thin client in `mobile/`: Setup, Chat approvals (with escalation

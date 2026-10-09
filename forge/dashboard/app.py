@@ -475,6 +475,56 @@ async def lexicon_render_endpoint(request: Request,
         template, sender=(body.get("sender") or "").strip())})
 
 
+# -- tube sites (manual-assist) --------------------------------------------------
+@app.get("/tube/sites")
+def tube_sites_endpoint(_: None = Depends(_require_token)) -> JSONResponse:
+    """Honest per-site upload capability matrix (mobile client)."""
+    from forge.tube.sites import capability_rows
+    return JSONResponse({"sites": capability_rows()})
+
+
+@app.post("/tube/metadata")
+async def tube_metadata_endpoint(request: Request,
+                                 _: None = Depends(_require_token)) -> JSONResponse:
+    """Preview title/description/tags. Body: {site, scene?, name?, tags?}."""
+    from forge.pay.links import build_payment_links
+    from forge.tube.metadata import generate_metadata
+    from forge.tube.sites import get_site
+    body = await request.json()
+    try:
+        site = get_site((body.get("site") or "").strip())
+    except KeyError as e:
+        raise HTTPException(400, str(e))
+    meta = generate_metadata(
+        site, body.get("scene") or {}, name=body.get("name", ""),
+        custom_tags=body.get("tags") or [],
+        links=build_payment_links(_config()))
+    return JSONResponse(meta.to_dict())
+
+
+@app.post("/tube/packet")
+async def tube_packet_endpoint(request: Request,
+                              _: None = Depends(_require_token)) -> JSONResponse:
+    """Build an upload packet. Body: {video, site, scene?, name?, tags?}."""
+    from forge.pay.links import build_payment_links
+    from forge.tube.packets import build_packet
+    from forge.tube.sites import get_site
+    body = await request.json()
+    video = (body.get("video") or "").strip()
+    if not video:
+        raise HTTPException(400, "Body needs {video, site}.")
+    try:
+        site = get_site((body.get("site") or "").strip())
+    except KeyError as e:
+        raise HTTPException(400, str(e))
+    out = _config().get_path("post.packets_dir", "./forge-data/packets")
+    dest = build_packet(video, site, out, scene=body.get("scene") or {},
+                        name=body.get("name", ""),
+                        custom_tags=body.get("tags") or [],
+                        links=build_payment_links(_config()))
+    return JSONResponse({"packet": str(dest)})
+
+
 # -- spicy chat (consent-gated) + triage ---------------------------------------
 
 def _spicy_engine_or_400():

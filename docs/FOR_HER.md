@@ -116,6 +116,11 @@ nice page you can send fans.
   you a ready-to-post packet — media, caption, hashtags, checklist — and
   reminds you when it's due. You tap post in the app yourself.
 - **Scheduler:** plan your week of posts; it reminds you what's due.
+- **Tube sites (Pornhub, XVideos, XNXX, xHamster, RedTube, YouPorn):**
+  none of them allow auto-upload, so the app writes you a complete
+  upload packet per video per site — a catchy title, a description with
+  your links in it, auto-picked tags, and a checklist. You paste and
+  publish on each site from your verified account.
 
 ## 9. Know your numbers
 
