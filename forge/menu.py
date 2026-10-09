@@ -101,6 +101,20 @@ SECTIONS: list[tuple[str, list[tuple[str, str, list[tuple[str, str, Any]]]]]] = 
           ("text", "Template text ({sender} = their name)", None),
           ("category", "Category", "general")]),
         ("List canned templates", "chat_template_list", []),
+        ("Add a word to her word bank", "chat_lexicon_add",
+         [("category", "slang / phrases / pet_names / emoji / openers / closers / spicy", "slang"),
+          ("term", "Word or phrase", None),
+          ("note", "Note (optional)", "")]),
+        ("List her word bank", "chat_lexicon_list",
+         [("category", "Category (blank = all)", ""),
+          ("search", "Search (blank = all)", "")]),
+        ("Remove a word from her word bank", "chat_lexicon_remove",
+         [("category", "Category", "slang"),
+          ("term", "Word or phrase", None)]),
+        ("Adopt learned words into her word bank", "chat_lexicon_adopt",
+         [("profile", "Style profile path", "style-profile.json"),
+          ("n", "How many words", "10"),
+          ("category", "Category", "slang")]),
         ("Use a template (draft into queue)", "chat_template_use",
          [("name", "Template name", None),
           ("platform", "Platform", None),
@@ -393,7 +407,7 @@ def _ask(prompt: str, default: Any) -> Any:
 
 
 _INT_PARAMS = {"draft_id", "post_id", "port", "duration", "views",
-               "likes", "comments"}
+               "likes", "comments", "n"}
 _FLOAT_PARAMS = {"amount", "opacity", "typo"}
 
 

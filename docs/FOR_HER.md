@@ -52,6 +52,11 @@ It also flags messages that need your eyes — angry fans, refund talk,
 anything risky — and it can answer "what's your menu?" style questions
 automatically from your tip menu.
 
+**Your word bank:** save your own dictionary — your slang, signature
+phrases, pet names for fans, favorite emojis, how you open and close
+messages. The bot uses *your* words first when it drafts, so it sounds
+like you instead of a robot.
+
 ## 4. Spicy mode (the stuff you asked for)
 
 A separate chat mode for flirty/dirty talk, with levels you control:

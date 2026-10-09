@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.git/
+.gitignore
+mobile/node_modules/
+mobile/.expo/
+forge-data/
+identity-packs/
+*.db
+*.sqlite3
+.DS_Store

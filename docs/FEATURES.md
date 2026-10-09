@@ -12,6 +12,7 @@ limits of each. If a feature isn't listed here, it doesn't exist.
 | Web dashboard | `forge dashboard` | Browser UI at http://127.0.0.1:8765, PWA-installable on Android |
 | Android app | `mobile/` (Expo) | Phone thin-client talking to the dashboard backend |
 | Terminal | `forge <command>` | Scripting, automation |
+| Docker | `docker compose up` | Normal Windows laptop, no Python needed (see `docs/DOCKER.md`) |
 
 ## Content catalog
 
@@ -85,6 +86,13 @@ limits of each. If a feature isn't listed here, it doesn't exist.
 - `forge chat style-build` / `style-report` -- learns how SHE texts
   from her exported chats (consent-gated, encrypted). Produces a
   human-readable report she can review and edit.
+- **Custom word bank** (`forge chat lexicon-add/list/remove/import/export`,
+  dashboard `/chat/lexicon`, also in `forge menu`) -- her saved dictionary:
+  slang, signature phrases, pet names, go-to emoji, openers, closers, plus
+  a spicy-only shelf (gated like spicy chat). Custom entries beat the
+  learned profile when drafting. `lexicon-adopt` promotes words the style
+  profiler found into the bank for her review. Templates can use
+  {pet_name} {phrase} {slang} {emoji} {opener} {closer} placeholders.
 
 ## Spicy chat (her request — consent-gated)
 

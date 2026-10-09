@@ -409,6 +409,72 @@ async def templates_use_endpoint(name: str, request: Request,
     return JSONResponse({"draft_id": draft.id, "reply": draft.reply})
 
 
+# -- custom word bank ----------------------------------------------------------
+def _lexicon():
+    """Load her custom word bank (path from config)."""
+    from forge.chat.lexicon import CustomLexicon
+    return CustomLexicon.load(
+        _config().get_path("chat.lexicon_path", "./forge-data/lexicon.json"))
+
+
+def _save_lexicon(lex) -> None:
+    lex.save(_config().get_path("chat.lexicon_path", "./forge-data/lexicon.json"))
+
+
+@app.get("/chat/lexicon")
+def lexicon_list(category: str | None = None,
+                 _: None = Depends(_require_token)) -> JSONResponse:
+    """Her custom word bank (mobile client)."""
+    lex = _lexicon()
+    data = lex.list(category)
+    return JSONResponse({"categories": {c: [e.to_dict() for e in items]
+                                        for c, items in data.items()}})
+
+
+@app.post("/chat/lexicon/add")
+async def lexicon_add_endpoint(request: Request,
+                               _: None = Depends(_require_token)) -> JSONResponse:
+    """Add a term. Body: {category, term, note?}."""
+    from forge.chat.lexicon import CATEGORIES
+    body = await request.json()
+    category = (body.get("category") or "").strip()
+    term = (body.get("term") or "").strip()
+    if category not in CATEGORIES or not term:
+        raise HTTPException(400, f"Body needs category in {CATEGORIES} + term.")
+    lex = _lexicon()
+    added = lex.add(category, term, body.get("note", ""))
+    if added:
+        _save_lexicon(lex)
+    return JSONResponse({"added": added, "category": category, "term": term})
+
+
+@app.post("/chat/lexicon/remove")
+async def lexicon_remove_endpoint(request: Request,
+                                  _: None = Depends(_require_token)) -> JSONResponse:
+    """Remove a term. Body: {category, term}."""
+    body = await request.json()
+    lex = _lexicon()
+    try:
+        removed = lex.remove((body.get("category") or "").strip(),
+                             (body.get("term") or "").strip())
+    except ValueError:
+        raise HTTPException(400, "Unknown category.")
+    if removed:
+        _save_lexicon(lex)
+    return JSONResponse({"removed": removed})
+
+
+@app.post("/chat/lexicon/render")
+async def lexicon_render_endpoint(request: Request,
+                                  _: None = Depends(_require_token)) -> JSONResponse:
+    """Fill {placeholders} from the word bank. Body: {template, sender?}."""
+    body = await request.json()
+    template = body.get("template") or ""
+    lex = _lexicon()
+    return JSONResponse({"rendered": lex.render(
+        template, sender=(body.get("sender") or "").strip())})
+
+
 # -- spicy chat (consent-gated) + triage ---------------------------------------
 
 def _spicy_engine_or_400():

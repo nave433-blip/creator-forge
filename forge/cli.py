@@ -1071,6 +1071,149 @@ def chat_template_delete(
     typer.echo(f"Template '{name}' deleted.")
 
 
+def _load_lexicon(cfg):
+    from forge.chat.lexicon import CustomLexicon
+    return CustomLexicon.load(
+        cfg.get_path("chat.lexicon_path", "./forge-data/lexicon.json"))
+
+
+def _save_lexicon(cfg, lex) -> None:
+    lex.save(cfg.get_path("chat.lexicon_path", "./forge-data/lexicon.json"))
+
+
+@chat_app.command("lexicon-add")
+def chat_lexicon_add(
+    category: str = typer.Option(..., help="slang|phrases|pet_names|emoji|openers|closers|spicy"),
+    term: str = typer.Option(...),
+    note: str = typer.Option("", "--note"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Save a word/phrase to her custom word bank."""
+    from forge.chat.lexicon import CATEGORIES
+    cfg = _cfg(config)
+    lex = _load_lexicon(cfg)
+    try:
+        added = lex.add(category, term, note)
+    except ValueError as e:
+        typer.echo(f"Pick a category: {', '.join(CATEGORIES)}", err=True)
+        raise typer.Exit(1)
+    if not added:
+        typer.echo(f"Already in {category}: {term}")
+        return
+    _save_lexicon(cfg, lex)
+    typer.echo(f"Saved to {category}: {term}")
+
+
+@chat_app.command("lexicon-list")
+def chat_lexicon_list(
+    category: Optional[str] = typer.Option(None, "--category"),
+    search: Optional[str] = typer.Option(None, "--search"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """List her custom word bank (optionally one category or a search)."""
+    cfg = _cfg(config)
+    lex = _load_lexicon(cfg)
+    if search:
+        hits = lex.search(search)
+        if not hits:
+            typer.echo(f"No matches for '{search}'.")
+            return
+        for cat, e in hits:
+            typer.echo(f"- [{cat}] {e.term}" + (f" ({e.note})" if e.note else ""))
+        return
+    data = lex.list(category)
+    empty = True
+    for cat, items in data.items():
+        if items:
+            empty = False
+            typer.echo(f"[{cat}]")
+            for e in items:
+                typer.echo(f"  - {e.term}" + (f" ({e.note})" if e.note else ""))
+    if empty:
+        typer.echo("Word bank is empty. Add with: forge chat lexicon-add")
+
+
+@chat_app.command("lexicon-remove")
+def chat_lexicon_remove(
+    category: str = typer.Option(...),
+    term: str = typer.Option(...),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Remove a word/phrase from her word bank."""
+    cfg = _cfg(config)
+    lex = _load_lexicon(cfg)
+    try:
+        removed = lex.remove(category, term)
+    except ValueError:
+        typer.echo("Unknown category.", err=True)
+        raise typer.Exit(1)
+    if removed:
+        _save_lexicon(cfg, lex)
+        typer.echo(f"Removed from {category}: {term}")
+    else:
+        typer.echo(f"Not found in {category}: {term}")
+
+
+@chat_app.command("lexicon-import")
+def chat_lexicon_import(
+    file: str = typer.Option(..., "--file", help="JSON file to import."),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Import a word bank JSON file (merges, skips dupes)."""
+    import json as _json
+    cfg = _cfg(config)
+    lex = _load_lexicon(cfg)
+    data = _json.loads(Path(file).read_text(encoding="utf-8"))
+    incoming = (data.get("entries") or {}) if isinstance(data, dict) else {}
+    added = 0
+    for cat, items in incoming.items():
+        for item in items:
+            term = item.get("term") if isinstance(item, dict) else item
+            if term and lex.add(cat, str(term),
+                               item.get("note", "") if isinstance(item, dict) else ""):
+                added += 1
+    _save_lexicon(cfg, lex)
+    typer.echo(f"Imported {added} new term(s).")
+
+
+@chat_app.command("lexicon-export")
+def chat_lexicon_export(
+    file: str = typer.Option("lexicon.json", "--file"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Export her word bank to a JSON file (backup/share)."""
+    cfg = _cfg(config)
+    lex = _load_lexicon(cfg)
+    lex.save(file)
+    total = sum(len(v) for v in lex.entries.values())
+    typer.echo(f"Exported {total} term(s) to {file}")
+
+
+@chat_app.command("lexicon-adopt")
+def chat_lexicon_adopt(
+    profile: str = typer.Option("style-profile.json", "--profile"),
+    n: int = typer.Option(10, "--n", help="How many top words to adopt."),
+    category: str = typer.Option("slang", "--category"),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Promote top words from her learned style profile into the word bank."""
+    import json as _json
+    from forge.chat.style import StyleProfile
+    cfg = _cfg(config)
+    data = _json.loads(Path(profile).read_text(encoding="utf-8"))
+    prof = StyleProfile.from_dict(data)
+    lex = _load_lexicon(cfg)
+    try:
+        added = lex.adopt_from_profile(prof, n=n, category=category)
+    except ValueError:
+        typer.echo("Unknown category.", err=True)
+        raise typer.Exit(1)
+    _save_lexicon(cfg, lex)
+    typer.echo(f"Adopted {len(added)} word(s) into {category}: "
+               f"{', '.join(added) or '(none new)'}")
+    typer.echo("Review with: forge chat lexicon-list")
+
+
 # -- video: batch queue --------------------------------------------------------
 @video_app.command("queue-add")
 def video_queue_add(

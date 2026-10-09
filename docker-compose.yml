@@ -1,0 +1,29 @@
+# CreatorForge — one command on any laptop with Docker.
+#
+#   docker compose up -d          # dashboard at http://localhost:8765
+#   docker compose run --rm forge chat lexicon-list
+#   docker compose run --rm forge menu
+#
+# Your data (catalog, vault, word bank, identity packs) lives in the
+# ./forge-data and ./identity-packs folders next to this file — NOT
+# inside the container. Delete the container and your stuff survives.
+
+services:
+  forge:
+    build: .
+    image: creator-forge:latest
+    container_name: creator-forge
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./forge-data:/app/forge-data
+      - ./identity-packs:/app/identity-packs
+      # Optional: mount your content folder read-only for catalog scans:
+      # - C:/Users/you/Pictures/content:/content:ro
+    environment:
+      # Vault password via env (or type it at prompts instead):
+      # - FORGE_VAULT_PASSWORD=change-me
+      # Dashboard token (recommended if the laptop is shared):
+      # - FORGE_DASHBOARD_API_TOKEN=pick-something-long
+      - TZ=America/Indiana/Indianapolis
+    restart: unless-stopped
