@@ -1,0 +1,26 @@
+# EXAMPLE identity pack. Do NOT use this as-is: create a real one with
+# `forge identity create --statement-file signed-consent.txt`.
+# The video pipeline refuses to run unless this pack validates.
+name: Example Creator
+created: 2026-10-09
+notes: Replace with the creator's real details.
+consent:
+  signer: Jane Example
+  date: 2026-10-09
+  scope: >-
+    Training a personal AI likeness (LoRA/persona model) on my own content
+    and generating AI videos of myself for posting on my own accounts.
+  statement_checksum: REPLACE_WITH_REAL_CHECKSUM
+consent_statement: |
+  REPLACE WITH THE FULL SIGNED CONSENT STATEMENT (see docs/CONSENT.md).
+
+# Comfort boundary for the scene director: which categories she films
+# herself (real footage is used) vs which are AI-only (AI generates them).
+# Anything not listed here is REFUSED. Edit only with her agreement.
+comfort:
+  self_filmed:
+    - lifestyle
+    - talking-head
+  ai_only:
+    - fantasy
+    - cosplay

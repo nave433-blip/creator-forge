@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+mobile/node_modules/
+mobile/.expo/
+*.db
+*.sqlite3
+forge.yaml
+.vault-session
+.vault/
+.DS_Store
+*.tgz
+*.zip

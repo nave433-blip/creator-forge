@@ -1,0 +1,21 @@
+# EXAMPLE chat persona + triggers. Copy to persona.yaml and make it yours.
+persona:
+  name: creator
+  tone: friendly, playful, professional -- never pushy
+  greeting: "Heyy! Thanks for messaging me"
+  fallback: "Thanks for reaching out! I'll get back to you personally soon"
+  boundaries:
+    - meet in person
+    - free content
+    - personal phone number
+
+triggers:
+  - name: price-question
+    pattern: "\\b(how much|price|cost|rates?)\\b"
+    reply_template: "Hey {sender}! My tip menu is linked on my page -- let me know what you're looking for and I'll point you to the right tier"
+  - name: custom-request
+    pattern: "\\b(custom|request|commission)\\b"
+    reply_template: "I do take customs, {sender}! Tell me what you have in mind and I'll check what's possible"
+  - name: greeting
+    pattern: "^(hi+|hey+|hello)\\b"
+    reply_template: "Heyy {sender}! Thanks for stopping by -- how are you doing today?"

@@ -1,0 +1,11 @@
+# Example scene template. Categories MUST exist in the identity pack's
+# `comfort` section (self_filmed or ai_only) or the scene is refused.
+name: Neon rooftop fantasy
+setting: neon-lit city rooftop at night, rain
+outfit: black bodysuit with glowing accents
+camera_angle: slow dolly-in, medium shot
+action: dancing in the rain, hair whipping in the wind
+categories:
+  - fantasy
+prompt_extra: cinematic lighting, shallow depth of field
+notes: She doesn't film fantasy scenes herself -- AI-only per her comfort section.

@@ -1,0 +1,34 @@
+[project]
+name = "creator-forge"
+version = "0.1.0"
+description = "AI creator-assistant toolkit: catalog, persona video pipeline, posting helpers, approval-gated chat, payment links"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pillow>=10.0",
+    "praw>=7.7",
+    "requests>=2.31",
+    "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+forge = "forge.cli:app"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["forge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
