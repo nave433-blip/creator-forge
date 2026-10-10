@@ -645,3 +645,24 @@ export const getPromoLinks = (s: BackendSettings) =>
 
 export const getPromoReport = (s: BackendSettings) =>
   apiGet<{ campaigns: PromoCampaign[] }>(s, '/promo/report');
+
+export interface TelegramStatus {
+  configured: boolean;
+  ok?: boolean;
+  username?: string;
+  name?: string;
+  error?: string;
+}
+
+export interface TelegramSendResult {
+  message_id: number;
+  paid_stars: number | null;
+}
+
+export const getTelegramStatus = (s: BackendSettings) =>
+  apiGet<TelegramStatus>(s, '/telegram/status');
+
+export const sendTelegram = (
+  s: BackendSettings,
+  body: { chat?: string; text?: string; photo?: string; video?: string; caption?: string; paid_stars?: number },
+) => apiPost<TelegramSendResult>(s, '/telegram/send', { body: JSON.stringify(body) });

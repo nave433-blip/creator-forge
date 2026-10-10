@@ -8,6 +8,7 @@ import IdentityScreen from './src/screens/IdentityScreen';
 import ChatQueueScreen from './src/screens/ChatQueueScreen';
 import PayScreen from './src/screens/PayScreen';
 import PromoScreen from './src/screens/PromoScreen';
+import TelegramScreen from './src/screens/TelegramScreen';
 import PacketsScreen from './src/screens/PacketsScreen';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import AnalyticsScreen from './src/screens/AnalyticsScreen';
@@ -24,7 +25,7 @@ import TubeScreen from './src/screens/TubeScreen';
 import LexiconScreen from './src/screens/LexiconScreen';
 import AIScreen from './src/screens/AIScreen';
 
-type Tab = 'catalog' | 'identity' | 'chat' | 'pay' | 'promo' | 'packets' | 'schedule' | 'analytics' | 'templates' | 'triage' | 'spicy' | 'orders' | 'live' | 'crm' | 'stream' | 'flows' | 'ideas' | 'tube' | 'lexicon' | 'ai' | 'setup';
+type Tab = 'catalog' | 'identity' | 'chat' | 'pay' | 'promo' | 'telegram' | 'packets' | 'schedule' | 'analytics' | 'templates' | 'triage' | 'spicy' | 'orders' | 'live' | 'crm' | 'stream' | 'flows' | 'ideas' | 'tube' | 'lexicon' | 'ai' | 'setup';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'chat', label: 'Chat' },
@@ -46,6 +47,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'packets', label: 'Packets' },
   { key: 'pay', label: 'Pay' },
   { key: 'promo', label: 'Promo' },
+  { key: 'telegram', label: 'Telegram' },
   { key: 'identity', label: 'Consent' },
   { key: 'setup', label: 'Setup' },
 ];
@@ -101,6 +103,8 @@ function Shell() {
           <PayScreen />
         ) : tab === 'promo' ? (
           <PromoScreen />
+        ) : tab === 'telegram' ? (
+          <TelegramScreen />
         ) : tab === 'packets' ? (
           <PacketsScreen />
         ) : (
