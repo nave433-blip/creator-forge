@@ -748,13 +748,23 @@ def telegram_send_photo(
     caption: str = typer.Option("", "--caption"),
     chat: Optional[str] = typer.Option(None, "--chat"),
     token: Optional[str] = typer.Option(None, "--token"),
+    paid_stars: int = typer.Option(0, "--paid-stars",
+                                   help="Put the photo behind a Stars "
+                                        "paywall (PPV). Stars economics "
+                                        "live inside Telegram."),
     config: Optional[str] = typer.Option(None, "--config"),
 ):
     """Send a photo drop to a chat/channel via her bot."""
     cfg = _cfg(config)
     chat_id = _telegram_chat(cfg, chat)
-    msg = _telegram_bot(cfg, token).send_photo(chat_id, photo, caption)
-    typer.echo(f"Photo sent (message {msg.get('message_id')}).")
+    bot = _telegram_bot(cfg, token)
+    if paid_stars:
+        msg = bot.send_paid_media(chat_id, photo, paid_stars, caption)
+        typer.echo(f"Paid photo sent ({paid_stars} Stars, "
+                   f"message {msg.get('message_id')}).")
+    else:
+        msg = bot.send_photo(chat_id, photo, caption)
+        typer.echo(f"Photo sent (message {msg.get('message_id')}).")
 
 
 @telegram_app.command("send-video")
@@ -763,13 +773,23 @@ def telegram_send_video(
     caption: str = typer.Option("", "--caption"),
     chat: Optional[str] = typer.Option(None, "--chat"),
     token: Optional[str] = typer.Option(None, "--token"),
+    paid_stars: int = typer.Option(0, "--paid-stars",
+                                   help="Put the video behind a Stars "
+                                        "paywall (PPV). Stars economics "
+                                        "live inside Telegram."),
     config: Optional[str] = typer.Option(None, "--config"),
 ):
     """Send a video drop to a chat/channel via her bot (<=50MB)."""
     cfg = _cfg(config)
     chat_id = _telegram_chat(cfg, chat)
-    msg = _telegram_bot(cfg, token).send_video(chat_id, video, caption)
-    typer.echo(f"Video sent (message {msg.get('message_id')}).")
+    bot = _telegram_bot(cfg, token)
+    if paid_stars:
+        msg = bot.send_paid_media(chat_id, video, paid_stars, caption)
+        typer.echo(f"Paid video sent ({paid_stars} Stars, "
+                   f"message {msg.get('message_id')}).")
+    else:
+        msg = bot.send_video(chat_id, video, caption)
+        typer.echo(f"Video sent (message {msg.get('message_id')}).")
 
 
 @connect_app.command("list")

@@ -109,8 +109,12 @@ each site's rules honestly.
 
 **Telegram announcements:** if you run a Telegram channel, the app can
 post text/photo/video drops to it through your own bot (you create the
-bot with @BotFather — takes two minutes). It can't do Telegram Stars
-payouts or read your DMs; it's just your announcement helper.
+bot with @BotFather — takes two minutes). Photos and videos can also go
+out **behind a Stars paywall** (PPV in Telegram: `forge telegram
+send-photo --paid-stars 50`) — the paywall itself is Telegram's, so what
+Telegram pays you is between you and Telegram. It can't read your DMs;
+it's just your announcement helper. There's a Telegram tab in the phone
+app for sending drops from bed.
 
 **Promo links:** doing a shoutout or collab? The app makes you a special
 tracked link for it, and you log what it earned — then it tells you
