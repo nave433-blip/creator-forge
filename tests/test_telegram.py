@@ -153,3 +153,26 @@ def test_cli_telegram_missing_chat_clean_error(tmp_path):
     assert code != 0
     assert "Traceback" not in out + err
     assert "--chat" in err
+
+
+def test_send_paid_media_photo_and_video(tmp_path):
+    bot, calls = _ok_bot()
+    photo = tmp_path / "p.jpg"
+    photo.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+    assert bot.send_paid_media("@c", photo, 50, "ppv drop")["message_id"] == 42
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"\x00" * 100)
+    assert bot.send_paid_media("@c", video, 100)["message_id"] == 42
+    assert any("sendPaidMedia" in c for c in calls)
+
+
+def test_send_paid_media_validation(tmp_path):
+    bot, _ = _ok_bot()
+    photo = tmp_path / "p.jpg"
+    photo.write_bytes(b"\xff\xd8\xff")
+    with pytest.raises(FileNotFoundError):
+        bot.send_paid_media("@c", tmp_path / "nope.jpg", 50)
+    with pytest.raises(ValueError, match="positive"):
+        bot.send_paid_media("@c", photo, 0)
+    with pytest.raises(ValueError, match="positive"):
+        bot.send_paid_media("@c", photo, -5)

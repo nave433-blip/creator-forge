@@ -1,9 +1,10 @@
 """Telegram bot adapter (announcements + media drops).
 
 Honest scope: Telegram's Bot API is a plain HTTPS API -- this adapter
-sends messages/photos/videos to a chat or channel from her bot. It does
-NOT promise Telegram Stars economics (revenue share and payouts live
-inside Telegram) and it does not read or automate fan DMs.
+sends messages/photos/videos to a chat or channel from her bot, including
+paid media (Stars paywall) via sendPaidMedia. It does NOT promise Telegram
+Stars economics (revenue share and payouts live inside Telegram) and it
+does not read or automate fan DMs.
 
 Sourcing note: python-telegram-bot (the established OSS library) is
 LGPL-3.0. For this narrow send-only surface, a thin adapter on httpx
@@ -112,3 +113,35 @@ class TelegramBot:
     def send_video(self, chat_id: str | int, path: str | Path,
                    caption: str = "") -> dict[str, Any]:
         return self._send_media("sendVideo", chat_id, path, caption)
+
+    # Paid media (PPV in Telegram). Honest scope: the Bot API's
+    # sendPaidMedia puts the photo/video behind a Stars paywall; the
+    # Stars price, revenue share, and payouts all live inside Telegram.
+    # This adapter only drives the API -- it cannot change what Telegram
+    # pays her.
+    _VIDEO_EXTS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".webm"})
+
+    def send_paid_media(self, chat_id: str | int, path: str | Path,
+                        stars: int, caption: str = "") -> dict[str, Any]:
+        """Send a photo/video behind a Stars paywall (sendPaidMedia)."""
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"Media file not found: {p}")
+        if p.stat().st_size > 50 * 1024 * 1024:
+            raise ValueError(
+                f"{p.name} is over Telegram's 50MB bot-API upload limit.")
+        if not isinstance(stars, int) or stars <= 0:
+            raise ValueError("stars must be a positive integer "
+                             "(Telegram Stars price for the paywall).")
+        media_type = ("video" if p.suffix.lower() in self._VIDEO_EXTS
+                      else "photo")
+        import json as _json
+        media = _json.dumps([{
+            "type": media_type,
+            "media": f"attach://{p.name}",
+            "caption": caption or None,
+        }])
+        with p.open("rb") as fh:
+            files = {p.name: (p.name, fh.read())}
+            return self._call("sendPaidMedia", chat_id=chat_id,
+                              star_count=stars, media=media, _files=files)
