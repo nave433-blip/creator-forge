@@ -108,6 +108,8 @@ def index() -> str:
 <li><a href="/identity">Identity / consent status</a></li>
 <li><a href="/chat/queue">Chat approval queue</a></li>
 <li><a href="/pay">Payment links</a></li>
+<li><a href="/promo/links">Promo links</a></li>
+<li><a href="/telegram/status">Telegram bot</a></li>
 <li><a href="/schedule">Schedule (due reminders)</a></li>
 <li><a href="/analytics">Analytics</a></li>
 <li><a href="/skills">Skills</a></li>
@@ -545,6 +547,88 @@ async def tube_packet_endpoint(request: Request,
                         custom_tags=body.get("tags") or [],
                         links=build_payment_links(_config()))
     return JSONResponse({"packet": str(dest)})
+
+
+# -- telegram (bot announcements + paid media) -----------------------------------
+def _telegram_bot_or_400(token: str | None = None):
+    """Build her Telegram bot from config; 400 with setup hint if missing."""
+    from forge.telegram.bot import (
+        TelegramAPIError,
+        TelegramBot,
+        TelegramNotConfiguredError,
+        resolve_token,
+    )
+    cfg = _config()
+    tok = resolve_token(token or cfg.get_path("telegram.bot_token", ""))
+    if not tok:
+        raise HTTPException(
+            400, "No Telegram bot token: create a bot with @BotFather and "
+                 "set telegram.bot_token in forge.yaml or TELEGRAM_BOT_TOKEN.")
+    try:
+        return TelegramBot(tok)
+    except TelegramAPIError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/telegram/status")
+def telegram_status_endpoint(
+        _: None = Depends(_require_token)) -> JSONResponse:
+    """Bot status (configured or not; never leaks the token)."""
+    cfg = _config()
+    from forge.telegram.bot import resolve_token
+    if not resolve_token(cfg.get_path("telegram.bot_token", "")):
+        return JSONResponse({"configured": False})
+    try:
+        me = _telegram_bot_or_400().status()
+    except Exception as e:
+        return JSONResponse({"configured": True, "ok": False,
+                             "error": str(e)})
+    return JSONResponse({"configured": True, "ok": True,
+                         "username": me.get("username"),
+                         "name": me.get("first_name")})
+
+
+@app.post("/telegram/send")
+async def telegram_send_endpoint(request: Request,
+                                 _: None = Depends(_require_token)
+                                 ) -> JSONResponse:
+    """Send via her bot. Body: {chat?, text?, photo?, video?, caption?,
+    paid_stars?}. Media paths are server-local files. paid_stars puts the
+    media behind a Stars paywall (Stars economics live inside Telegram)."""
+    from forge.telegram.bot import TelegramAPIError
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    cfg = _config()
+    chat_id = (body.get("chat")
+               or cfg.get_path("telegram.default_chat_id", ""))
+    if not chat_id:
+        raise HTTPException(400, "Body needs {chat} or set "
+                                 "telegram.default_chat_id.")
+    bot = _telegram_bot_or_400()
+    caption = (body.get("caption") or "")
+    paid_stars = int(body.get("paid_stars") or 0)
+    try:
+        if body.get("photo") or body.get("video"):
+            path = body.get("photo") or body.get("video")
+            if paid_stars:
+                msg = bot.send_paid_media(str(chat_id), path, paid_stars,
+                                          caption)
+            elif body.get("photo"):
+                msg = bot.send_photo(str(chat_id), path, caption)
+            else:
+                msg = bot.send_video(str(chat_id), path, caption)
+        else:
+            text = (body.get("text") or "").strip()
+            if not text:
+                raise HTTPException(400, "Body needs {text} or "
+                                         "{photo|video}.")
+            msg = bot.send_message(str(chat_id), text)
+    except (TelegramAPIError, FileNotFoundError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse({"message_id": msg.get("message_id"),
+                         "paid_stars": paid_stars or None})
 
 
 # -- public AI providers ---------------------------------------------------------
