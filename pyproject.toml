@@ -1,6 +1,6 @@
 [project]
 name = "creator-forge"
-version = "0.3.3"
+version = "0.3.4"
 description = "AI creator-assistant toolkit: catalog, persona video pipeline, posting helpers, approval-gated chat, payment links"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,7 @@ dependencies = [
     "praw>=7.7",
     "requests>=2.31",
     "cryptography>=42.0",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
