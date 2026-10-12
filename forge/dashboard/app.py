@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 
@@ -128,12 +128,19 @@ if ('serviceWorker' in navigator) {
 
 @app.get("/catalog")
 def catalog(kind: str | None = None, q: str | None = None,
-            limit: int = 100,
+            limit: int = 100, offset: int = 0,
             _: None = Depends(_require_token)) -> JSONResponse:
     store = _store()
-    items = store.search(q, limit=limit) if q else store.list(kind=kind,
-                                                              limit=limit)
-    return JSONResponse({"count": store.count(), "items": items})
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    if q:
+        items = store.search(q, limit=limit, offset=offset)
+        total = store.search_count(q)
+    else:
+        items = store.list(kind=kind, limit=limit, offset=offset)
+        total = store.count(kind=kind)
+    return JSONResponse({"count": store.count(), "total": total,
+                         "limit": limit, "offset": offset, "items": items})
 
 
 @app.get("/identity")
@@ -224,6 +231,41 @@ def promo_links_json(campaign: str | None = None,
 def promo_report_json(_: None = Depends(_require_token)) -> JSONResponse:
     """Per-campaign promo earnings report."""
     return JSONResponse({"campaigns": _promo().report()})
+
+
+@app.get("/promo/go/{code}")
+def promo_go(code: str, request: Request) -> RedirectResponse:
+    """Short-link redirect: logs a raw click, then 302s to the tagged URL.
+
+    Public by design (it's a link she shares), so no token required.
+    Only counts clicks routed through this endpoint on a dashboard that is
+    reachable from the internet; the raw UTM URL bypasses it. Raw hits,
+    not deduplicated uniques.
+    """
+    tracker = _promo()
+    try:
+        link = tracker.get_by_code(code)
+    except KeyError:
+        raise HTTPException(404, "unknown promo code")
+    try:
+        tracker.log_click(
+            code,
+            user_agent=request.headers.get("user-agent", "")[:300],
+            referrer=request.headers.get("referer", "")[:300])
+    except KeyError:
+        pass  # link vanished between lookup and log; redirect anyway
+    return RedirectResponse(url=link["full_url"], status_code=302)
+
+
+@app.get("/promo/clicks/{code}")
+def promo_clicks_json(code: str,
+                      _: None = Depends(_require_token)) -> JSONResponse:
+    """Raw click count for one promo short code."""
+    try:
+        return JSONResponse({"code": code.strip().upper(),
+                             "clicks": _promo().click_count(code)})
+    except KeyError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.get("/post/packets")

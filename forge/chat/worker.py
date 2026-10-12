@@ -51,15 +51,21 @@ class ManualInboxAdapter(BaseChatAdapter):
 
     def _offset(self) -> int:
         try:
-            return int(self.offset_path.read_text(encoding="utf-8").strip())
+            n = int(self.offset_path.read_text(encoding="utf-8").strip())
         except (FileNotFoundError, ValueError):
             return 0
+        return max(0, n)
 
     def poll(self) -> list[dict[str, Any]]:
         if not self.inbox_path.is_file():
             return []
         lines = self.inbox_path.read_text(encoding="utf-8").splitlines()
         start = self._offset()
+        if start > len(lines):
+            # Inbox was truncated or rotated since last run: the old offset
+            # points past the end. Reset instead of silently reading nothing
+            # forever.
+            start = 0
         messages = []
         for line in lines[start:]:
             line = line.strip()

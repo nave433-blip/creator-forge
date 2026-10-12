@@ -182,3 +182,59 @@ def test_dashboard_promo_endpoints(tmp_path):
     r = c.get("/promo/links")
     assert r.status_code == 200
     assert r.json() == {"links": []}
+
+
+def test_log_click_and_count(tracker):
+    row = tracker.create_link("https://example.com/a", "c1")
+    assert tracker.click_count(row["code"]) == 0
+    tracker.log_click(row["code"], user_agent="UA", referrer="https://t.co")
+    tracker.log_click(row["code"])
+    assert tracker.click_count(row["code"]) == 2
+
+
+def test_log_click_unknown_code_raises(tracker):
+    import pytest as _p
+    with _p.raises(KeyError):
+        tracker.log_click("NOPE99")
+
+
+def test_log_click_code_case_insensitive(tracker):
+    row = tracker.create_link("https://example.com/a", "c1")
+    tracker.log_click(row["code"].lower())
+    assert tracker.click_count(row["code"]) == 1
+
+
+def test_report_includes_clicks(tracker):
+    a = tracker.create_link("https://example.com/a", "c1")
+    b = tracker.create_link("https://example.com/b", "c2")
+    tracker.log_click(a["code"])
+    tracker.log_click(a["code"])
+    tracker.log_click(b["code"])
+    rep = {r["campaign"]: r for r in tracker.report()}
+    assert rep["c1"]["clicks"] == 2
+    assert rep["c2"]["clicks"] == 1
+
+
+def test_dashboard_promo_go_redirect_and_counts(tmp_path):
+    import forge.dashboard.app as dash_app
+    from fastapi.testclient import TestClient
+    from forge.config import ForgeConfig
+    from forge.promo.tracker import PromoTracker
+    t = PromoTracker(tmp_path / "promo.db")
+    row = t.create_link("https://example.com/dest?x=1", "c1")
+    t.close()
+    dash_app.init_state(
+        ForgeConfig({"promo": {"db_path": str(tmp_path / "promo.db")}}),
+        tmp_path / "dash.db")
+    c = TestClient(dash_app.app)
+    r = c.get(f"/promo/go/{row['code']}", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"].startswith("https://example.com/dest")
+    assert "utm_campaign=c1" in r.headers["location"]
+    r = c.get(f"/promo/clicks/{row['code']}")
+    assert r.status_code == 200
+    assert r.json()["clicks"] == 1
+    r = c.get("/promo/go/NOPE99", follow_redirects=False)
+    assert r.status_code == 404
+    r = c.get("/promo/clicks/NOPE99")
+    assert r.status_code == 404

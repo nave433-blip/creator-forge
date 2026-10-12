@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS promo_results (
     logged_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_promo_campaign ON promo_links(campaign);
+CREATE TABLE IF NOT EXISTS promo_clicks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    link_id INTEGER NOT NULL REFERENCES promo_links(id),
+    clicked_at REAL NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    referrer TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_promo_clicks_link ON promo_clicks(link_id);
 """
 
 
@@ -155,14 +163,47 @@ class PromoTracker:
             return dict(row)
 
     def report(self) -> list[dict[str, Any]]:
-        """Per-campaign totals: links, attributed earnings."""
+        """Per-campaign totals: links, clicks, attributed earnings."""
         with self._lock:
             rows = self._conn.execute(
                 """SELECT l.campaign AS campaign,
                           COUNT(DISTINCT l.id) AS links,
-                          COALESCE(SUM(r.amount), 0) AS earnings
+                          COALESCE(SUM(r.amount), 0) AS earnings,
+                          (SELECT COUNT(*) FROM promo_clicks c
+                           JOIN promo_links l2 ON l2.id = c.link_id
+                           WHERE l2.campaign = l.campaign) AS clicks
                    FROM promo_links l
                    LEFT JOIN promo_results r ON r.link_id = l.id
                    GROUP BY l.campaign
                    ORDER BY earnings DESC""").fetchall()
             return [dict(r) for r in rows]
+
+    def log_click(self, code: str, user_agent: str = "",
+                  referrer: str = "") -> dict[str, Any]:
+        """Record one click-through on a short link.
+
+        Honest scope: this only counts clicks that come through HER OWN
+        short links (``/promo/go/<code>`` on a dashboard that is reachable
+        from the internet). It cannot see clicks on the raw UTM URL. Counts
+        are raw hits, not deduplicated uniques -- bots and double-taps
+        count.
+        """
+        link = self.get_by_code(code)
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO promo_clicks (link_id, clicked_at, user_agent,"
+                " referrer) VALUES (?,?,?,?)",
+                (link["id"], time.time(), user_agent or "",
+                 referrer or ""))
+            self._conn.commit()
+            return {"code": link["code"], "link_id": link["id"],
+                    "click_id": cur.lastrowid}
+
+    def click_count(self, code: str) -> int:
+        """Raw hit count for one link's short code."""
+        link = self.get_by_code(code)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM promo_clicks WHERE link_id = ?",
+                (link["id"],)).fetchone()
+            return int(row["n"])

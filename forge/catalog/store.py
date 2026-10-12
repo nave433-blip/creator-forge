@@ -110,8 +110,12 @@ class CatalogStore:
                 "SELECT * FROM items WHERE sha256 = ?", (sha256,)).fetchone()
             return self._row_to_dict(row) if row else None
 
-    def count(self) -> int:
+    def count(self, kind: str | None = None) -> int:
         with self._lock:
+            if kind:
+                return self._conn.execute(
+                    "SELECT COUNT(*) FROM items WHERE kind = ?",
+                    (kind,)).fetchone()[0]
             return self._conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
 
     def list(self, kind: str | None = None, limit: int = 200,
@@ -127,13 +131,23 @@ class CatalogStore:
                     (limit, offset)).fetchall()
             return [self._row_to_dict(r) for r in rows]
 
-    def search(self, query: str, limit: int = 200) -> list[dict[str, Any]]:
+    def search(self, query: str, limit: int = 200,
+               offset: int = 0) -> list[dict[str, Any]]:
         """Substring search over path, notes, and tags."""
         like = f"%{query}%"
         with self._lock:
             rows = self._conn.execute(
                 """SELECT * FROM items
                    WHERE path LIKE ? OR notes LIKE ? OR tags LIKE ?
-                   ORDER BY id LIMIT ?""",
-                (like, like, like, limit)).fetchall()
+                   ORDER BY id LIMIT ? OFFSET ?""",
+                (like, like, like, limit, offset)).fetchall()
             return [self._row_to_dict(r) for r in rows]
+
+    def search_count(self, query: str) -> int:
+        """Total hits for a search query (for pagination)."""
+        like = f"%{query}%"
+        with self._lock:
+            return self._conn.execute(
+                """SELECT COUNT(*) FROM items
+                   WHERE path LIKE ? OR notes LIKE ? OR tags LIKE ?""",
+                (like, like, like)).fetchone()[0]

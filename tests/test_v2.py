@@ -396,3 +396,30 @@ def test_cli_vault_missing_blob_clean_error(tmp_path, monkeypatch):
                              "--password", "pw123")
     assert_clean_failure(code, out, err)
     assert "Vault: No blob 'nope'" in err
+
+
+def test_worker_offset_reset_on_truncated_inbox(tmp_path):
+    """A truncated/rotated inbox (offset past EOF) must not hang forever."""
+    import json
+    from forge.chat.worker import ManualInboxAdapter
+    inbox = tmp_path / "inbox.jsonl"
+    inbox.write_text("".join(
+        json.dumps({"platform": "p", "sender": "s", "text": f"m{i}"}) + "\n"
+        for i in range(3)))
+    ad = ManualInboxAdapter(inbox)
+    assert len(ad.poll()) == 3  # offset now 3
+    # Simulate rotation: new shorter file, stale offset (3) points past EOF.
+    inbox.write_text(json.dumps({"platform": "p", "sender": "s",
+                                 "text": "two"}) + "\n")
+    msgs = ad.poll()
+    assert [m["text"] for m in msgs] == ["two"]
+
+
+def test_worker_negative_offset_clamped(tmp_path):
+    from forge.chat.worker import ManualInboxAdapter
+    inbox = tmp_path / "inbox.jsonl"
+    inbox.write_text('{"platform": "p", "sender": "s", "text": "hi"}\n')
+    ad = ManualInboxAdapter(inbox)
+    ad.offset_path.write_text("-5")
+    msgs = ad.poll()
+    assert [m["text"] for m in msgs] == ["hi"]

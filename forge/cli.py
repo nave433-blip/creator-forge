@@ -526,8 +526,10 @@ def promo_link_create(
     """Generate a UTM-tagged promo link for a campaign.
 
     Honest scope: the tagged URL lets the platform's own analytics
-    attribute traffic. Clicks can't be seen from here -- log resulting
-    earnings with `promo log-earning` from the platform's payout reports.
+    attribute traffic. Clicks through HER OWN short link
+    (/promo/go/<code> on a reachable dashboard) are counted with
+    `promo clicks`. Log resulting earnings with `promo log-earning` from
+    the platform's payout reports.
     """
     tracker = _promo_tracker(_cfg(config))
     try:
@@ -537,6 +539,8 @@ def promo_link_create(
         tracker.close()
     typer.echo(f"Code: {row['code']}")
     typer.echo(f"URL:  {row['full_url']}")
+    typer.echo("Short:  /promo/go/" + row["code"] +
+               " (dashboard must be reachable to count clicks)")
 
 
 @promo_app.command("link-list")
@@ -584,7 +588,30 @@ def promo_report(config: Optional[str] = typer.Option(None, "--config")):
         return
     for r in rows:
         typer.echo(f"{r['campaign']}: {r['links']} link(s), "
+                   f"{r.get('clicks', 0)} click(s), "
                    f"${r['earnings']:.2f} attributed")
+
+
+@promo_app.command("clicks")
+def promo_clicks(
+    code: str = typer.Option(..., "--code", help="Link code from link-list."),
+    config: Optional[str] = typer.Option(None, "--config"),
+):
+    """Show the raw click count for a promo short link.
+
+    Counts only clicks that came through HER OWN short link
+    (/promo/go/<code>) on a dashboard reachable from the internet. Raw
+    hits, not deduplicated uniques.
+    """
+    tracker = _promo_tracker(_cfg(config))
+    try:
+        n = tracker.click_count(code)
+    except KeyError as e:
+        tracker.close()
+        raise typer.BadParameter(str(e))
+    finally:
+        tracker.close()
+    typer.echo(f"{code.upper()}: {n} click(s).")
 
 
 # -- vault -----------------------------------------------------------------
