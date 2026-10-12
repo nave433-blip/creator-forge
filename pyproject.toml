@@ -16,6 +16,7 @@ dependencies = [
     "requests>=2.31",
     "cryptography>=42.0",
     "httpx>=0.27",
+    "anyio>=4.0",
 ]
 
 [project.optional-dependencies]
@@ -33,7 +34,7 @@ build-backend = "setuptools.build_meta"
 include = ["forge*"]
 
 [tool.setuptools.package-data]
-forge = ["examples/*"]
+forge = ["examples/*", "dashboard/static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

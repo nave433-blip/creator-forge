@@ -31,7 +31,11 @@ forge catalog scan /path/to/her/photos --tags "original"
 
 # 5. Start the dashboard
 forge dashboard
-# open http://127.0.0.1:8765
+# open http://127.0.0.1:8765/ui/  -- the browser UI:
+#   Home (status cards), Chat queue (approve/reject from the browser),
+#   Catalog (search + pages), Promo (click counts), Schedule
+# The same backend also serves the Android app and the PWA.
+# Legacy JSON endpoints (e.g. /chat/queue) are unchanged for scripts.
 
 # ...or the interactive menu (no flags to memorize)
 forge menu
@@ -45,9 +49,13 @@ forge gui
 ```
 
 The GUI is iOS-glass styled and covers every area: catalog, identity,
-video, persona, chat approvals, posting, schedule, pay, vault,
-connectors, analytics, skills, settings. Without PySide6, `forge gui`
+video, persona, chat approvals, posting, schedule, pay, promo links,
+vault, connectors, analytics, skills, settings. Without PySide6, `forge gui`
 just prints the install hint -- nothing else breaks.
+
+Optional system tools (graceful if missing): `ffmpeg`/`ffprobe` for
+video durations and video resizing -- photo work is Pillow-only and
+always works.
 
 ### Add it to your app launcher
 
