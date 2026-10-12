@@ -30,7 +30,8 @@ app = FastAPI(title="CreatorForge Dashboard")
 _state: dict[str, Any] = {}
 
 bearer = HTTPBearer(auto_error=False)
-_PUBLIC_PATHS = {"/", "/docs", "/openapi.json", "/redoc"}
+_PUBLIC_PATHS = {"/", "/docs", "/openapi.json", "/redoc", "/ui", "/ui/",
+                "/ui/chat", "/ui/catalog", "/ui/promo", "/ui/schedule"}
 
 
 def _require_token(
@@ -91,39 +92,93 @@ def init_state(config: ForgeConfig, db_path: str | Path,
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return """<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CreatorForge</title>
-<meta name="theme-color" content="#111111">
-<meta name="description" content="CreatorForge local creator-assistant dashboard">
-<link rel="manifest" href="/static/manifest.json">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
-<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-</head><body>
-<h1>CreatorForge Dashboard</h1>
-<ul>
-<li><a href="/catalog">Catalog</a></li>
-<li><a href="/identity">Identity / consent status</a></li>
-<li><a href="/chat/queue">Chat approval queue</a></li>
-<li><a href="/pay">Payment links</a></li>
-<li><a href="/promo/links">Promo links</a></li>
-<li><a href="/telegram/status">Telegram bot</a></li>
-<li><a href="/schedule">Schedule (due reminders)</a></li>
-<li><a href="/analytics">Analytics</a></li>
-<li><a href="/skills">Skills</a></li>
-<li><a href="/templates">Chat templates</a></li>
-<li><a href="/docs">API docs</a></li>
-</ul>
-<script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/static/sw.js').catch(function(e) {
-    console.log('SW registration failed:', e);
-  });
-}
-</script>
-</body></html>"""
+    from forge.dashboard import web
+    return web.home_page()
+
+
+@app.get("/ui/", response_class=HTMLResponse)
+@app.get("/ui", response_class=HTMLResponse)
+def ui_home() -> str:
+    from forge.dashboard import web
+    return web.home_page()
+
+
+@app.get("/ui/chat", response_class=HTMLResponse)
+def ui_chat() -> str:
+    from forge.dashboard import web
+    return web.chat_page()
+
+
+@app.get("/ui/catalog", response_class=HTMLResponse)
+def ui_catalog() -> str:
+    from forge.dashboard import web
+    return web.catalog_page()
+
+
+@app.get("/ui/promo", response_class=HTMLResponse)
+def ui_promo() -> str:
+    from forge.dashboard import web
+    return web.promo_page()
+
+
+@app.get("/ui/schedule", response_class=HTMLResponse)
+def ui_schedule() -> str:
+    from forge.dashboard import web
+    return web.schedule_page()
+
+
+@app.get("/api/status")
+def api_status(_: None = Depends(_require_token)) -> JSONResponse:
+    """One-call dashboard summary for the web UI home page."""
+    cfg = _config()
+    # identity
+    pack_path = cfg.get_path("identity.pack_path")
+    if not pack_path:
+        identity = {"status": "missing",
+                    "detail": "No identity.pack_path configured."}
+    else:
+        try:
+            pack = validate_identity_pack(load_identity_pack(pack_path))
+            c = pack["consent"]
+            identity = {"status": "valid", "name": pack.get("name"),
+                        "signer": c["signer"], "date": c["date"]}
+        except InvalidConsentError as e:
+            identity = {"status": "invalid", "detail": str(e)}
+        except Exception as e:  # unreadable pack file etc.
+            identity = {"status": "invalid", "detail": str(e)}
+    # chat
+    try:
+        pending = len(_engine().queue.pending())
+    except Exception:
+        pending = 0
+    # catalog
+    try:
+        catalog_count = _store().count()
+        catalog_note = ""
+    except Exception:
+        catalog_count, catalog_note = 0, "catalog unavailable"
+    # telegram
+    try:
+        from forge.telegram.bot import resolve_token
+        tg = {"configured": bool(
+            resolve_token(cfg.get_path("telegram.bot_token", "")))}
+    except Exception:
+        tg = {"configured": False}
+    # promo
+    try:
+        campaigns = _promo().report()
+        promo = {"campaigns": len(campaigns),
+                 "links": sum(c.get("links", 0) for c in campaigns),
+                 "clicks": sum(c.get("clicks", 0) for c in campaigns),
+                 "earnings": round(sum(c.get("earnings", 0)
+                                       for c in campaigns), 2)}
+    except Exception:
+        promo = {"campaigns": 0, "links": 0, "clicks": 0, "earnings": 0}
+    return JSONResponse({"identity": identity,
+                         "chat": {"pending": pending},
+                         "catalog": {"count": catalog_count,
+                                     "note": catalog_note},
+                         "telegram": tg, "promo": promo})
 
 
 @app.get("/catalog")

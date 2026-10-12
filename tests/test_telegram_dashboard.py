@@ -175,3 +175,26 @@ def test_send_permanent_telegram_error_is_400(tmp_path, monkeypatch):
             "ok": False, "description": "Bad Request: chat not found"}))
     r = client.post("/telegram/send", json={"text": "hi"})
     assert r.status_code == 400
+
+
+def test_dashboard_web_ui_pages(tmp_path):
+    """Web UI: home + ui pages render; /api/status summarizes."""
+    import forge.dashboard.app as dash_app
+    from fastapi.testclient import TestClient
+    from forge.config import ForgeConfig
+    dash_app.init_state(
+        ForgeConfig({"promo": {"db_path": str(tmp_path / "promo.db")}}),
+        tmp_path / "dash.db")
+    c = TestClient(dash_app.app)
+    for path in ("/", "/ui", "/ui/", "/ui/chat", "/ui/catalog",
+                 "/ui/promo", "/ui/schedule"):
+        r = c.get(path)
+        assert r.status_code == 200, path
+        assert "CreatorForge" in r.text
+        assert "serviceWorker" in r.text
+    r = c.get("/api/status")
+    assert r.status_code == 200
+    s = r.json()
+    assert set(s) >= {"identity", "chat", "catalog", "telegram", "promo"}
+    assert s["identity"]["status"] == "missing"  # no pack in test config
+    assert s["chat"]["pending"] == 0
