@@ -366,3 +366,33 @@ def test_vault_exists_and_atomic_put(tmp_path):
     assert v.get("a") == b"secret"
     # No temp files left behind after writes.
     assert list((tmp_path / "v" / "data").glob("*.tmp")) == []
+
+
+def test_cli_vault_locked_clean_error(tmp_path, monkeypatch):
+    from tests.test_stress import run_cli, assert_clean_failure
+    from forge.vault.store import Vault
+    vault_dir = tmp_path / "vault"
+    Vault.init(vault_dir, "pw123")
+    Vault(vault_dir).lock()  # ensure locked
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run_cli("vault", "list", str(vault_dir),
+                             "--password", "pw123")
+    # correct password re-unlocks: lists fine (empty)
+    assert code == 0
+    Vault(vault_dir).lock()  # drop the session so the password is checked
+    code, out, err = run_cli("vault", "list", str(vault_dir),
+                             "--password", "wrong")
+    assert_clean_failure(code, out, err)
+    assert "Vault: Wrong password" in err
+
+
+def test_cli_vault_missing_blob_clean_error(tmp_path, monkeypatch):
+    from tests.test_stress import run_cli, assert_clean_failure
+    from forge.vault.store import Vault
+    vault_dir = tmp_path / "vault"
+    Vault.init(vault_dir, "pw123")
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run_cli("vault", "export", str(vault_dir), "nope",
+                             "--password", "pw123")
+    assert_clean_failure(code, out, err)
+    assert "Vault: No blob 'nope'" in err

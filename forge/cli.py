@@ -27,6 +27,7 @@ from forge.pay.links import build_payment_links, tip_menu_html
 from forge.post.manual import build_posting_packet, export_content_calendar
 from forge.post.reddit import RedditPost, submit
 from forge.video.pipeline import ConsentGateError, generate_video
+from forge.vault.store import VaultError
 
 
 class ForgeTyper(typer.Typer):
@@ -47,6 +48,11 @@ class ForgeTyper(typer.Typer):
         except (InvalidConsentError, ConsentGateError) as e:
             typer.echo(f"Refused: {e}", err=True)
             sys.exit(2)
+        except VaultError as e:
+            # Locked vault, wrong password, missing blob: expected domain
+            # errors, not crashes.
+            typer.echo(f"Vault: {e}", err=True)
+            sys.exit(1)
         except FileNotFoundError as e:
             typer.echo(f"Not found: {e.filename or e}", err=True)
             sys.exit(1)
