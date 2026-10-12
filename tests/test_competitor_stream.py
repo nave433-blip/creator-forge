@@ -348,3 +348,35 @@ def test_no_real_person_names_in_repo():
         if surname in text.lower():
             hits.append(str(p))
     assert not hits, f"real name leaked into repo: {hits}"
+
+
+class TestPPVIntentPrecision:
+    def test_word_boundaries_no_false_positives(self):
+        from forge.chat.ppv import looks_like_buying
+        assert looks_like_buying("how much for a custom video? ppv")
+        assert not looks_like_buying("I'm a happy customer, love your posts")
+        assert not looks_like_buying("buyer beware, scammers everywhere")
+
+    def test_price_match_picks_right_item(self):
+        from forge.chat.ppv import ppv_offer_text
+        menu = [{"label": "photo set", "price": "$10"},
+                {"label": "video", "price": "$25"}]
+        offer = ppv_offer_text(fan_message="how much for the $25 one?",
+                               price_menu=menu, pay_links={})
+        assert offer is not None and "video" in offer and "$25" in offer
+
+    def test_price_match_dollars_word(self):
+        from forge.chat.ppv import ppv_offer_text
+        menu = [{"label": "photo set", "price": "10"},
+                {"label": "video", "price": "25"}]
+        offer = ppv_offer_text(fan_message="I'll buy the 25 dollars video",
+                               price_menu=menu, pay_links={})
+        assert offer is not None and "video" in offer
+
+    def test_keyword_overlap_still_works(self):
+        from forge.chat.ppv import ppv_offer_text
+        menu = [{"label": "photo set", "price": "$10"},
+                {"label": "video", "price": "$25"}]
+        offer = ppv_offer_text(fan_message="want pics please, how much?",
+                               price_menu=menu, pay_links={})
+        assert offer is not None and "photo set" in offer
