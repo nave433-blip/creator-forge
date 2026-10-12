@@ -159,11 +159,20 @@ export const apiPost = <T>(
 
 /* ---- typed endpoints ---- */
 
-export const getCatalog = (s: BackendSettings, q?: string, kind?: string) => {
-  const params = new URLSearchParams({ limit: '100' });
+export const getCatalog = (
+  s: BackendSettings,
+  q?: string,
+  kind?: string,
+  offset = 0,
+  limit = 100,
+) => {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
   if (q) params.set('q', q);
   if (kind) params.set('kind', kind);
-  return apiGet<{ count: number; items: CatalogItem[] }>(
+  return apiGet<{ count: number; total: number; items: CatalogItem[] }>(
     s,
     `/catalog?${params.toString()}`,
   );
@@ -637,8 +646,12 @@ export interface PromoLink {
 export interface PromoCampaign {
   campaign: string;
   links: number;
+  clicks: number;
   earnings: number;
 }
+
+export const getPromoClicks = (s: BackendSettings, code: string) =>
+  apiGet<{ code: string; clicks: number }>(s, `/promo/clicks/${code}`);
 
 export const getPromoLinks = (s: BackendSettings) =>
   apiGet<{ links: PromoLink[] }>(s, '/promo/links');
