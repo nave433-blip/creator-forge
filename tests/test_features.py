@@ -269,3 +269,72 @@ def test_chat_queue_persists(tmp_path):
     e2 = _engine()
     e2.queue.load(p)
     assert e2.queue.get(d.id).reply == d.reply
+
+
+class TestTriggerFailFast:
+    def test_bad_regex_raises_with_trigger_name(self):
+        from forge.chat.engine import Trigger
+        with pytest.raises(ValueError, match="bad-trigger"):
+            Trigger(name="bad-trigger", pattern="(unclosed",
+                    reply_template="hi")
+
+    def test_good_trigger_still_matches(self):
+        from forge.chat.engine import Trigger
+        t = Trigger(name="t", pattern=r"\bhello\b", reply_template="hi")
+        assert t.matches("well hello there")
+        assert not t.matches("goodbye")
+
+
+class TestSafeFormat:
+    def test_known_fields_substituted(self):
+        from forge.chat.engine import safe_format
+        assert safe_format("hey {sender}, from {persona}!", sender="x",
+                           persona="y") == "hey x, from y!"
+
+    def test_unknown_braces_left_literal(self):
+        from forge.chat.engine import safe_format
+        # Prices/emoticons with braces must not crash or vanish.
+        assert safe_format("tip {5} or {10} babe", sender="x") == \
+            "tip {5} or {10} babe"
+        assert safe_format("unknown {nope} stays", sender="x") == \
+            "unknown {nope} stays"
+
+    def test_double_brace_escapes(self):
+        from forge.chat.engine import safe_format
+        assert safe_format("literal {{sender}} here", sender="x") == \
+            "literal {sender} here"
+
+    def test_template_with_braces_does_not_crash_engine(self):
+        from forge.chat.engine import Persona, RuleEngine, Trigger
+        eng = RuleEngine(Persona(), [Trigger(
+            name="t", pattern="price", reply_template="it's {5} babe {sender}")])
+        draft = eng.handle_message(platform="p", sender="sam",
+                                   text="what's the price?")
+        assert draft.reply == "it's {5} babe sam"
+
+
+class TestQueuePersistenceRobustness:
+    def test_load_ignores_unknown_keys(self, tmp_path):
+        import json
+        from forge.chat.engine import ApprovalQueue
+        p = tmp_path / "q.json"
+        p.write_text(json.dumps([{"id": 1, "platform": "p", "sender": "s",
+                                  "incoming": "hi", "reply": "yo",
+                                  "trigger": "t", "future_field": 99}]),
+                     encoding="utf-8")
+        q = ApprovalQueue()
+        q.load(p)  # must not raise
+        assert q.get(1).reply == "yo"
+
+    def test_save_is_atomic_no_tmp_left(self, tmp_path):
+        from forge.chat.engine import ApprovalQueue
+        q = ApprovalQueue()
+        q.add(platform="p", sender="s", incoming="hi", reply="yo",
+              trigger="t")
+        p = tmp_path / "q.json"
+        q.save(p)
+        assert p.is_file()
+        assert not (tmp_path / "q.json.tmp").exists()
+        q2 = ApprovalQueue()
+        q2.load(p)
+        assert len(q2.all()) == 1

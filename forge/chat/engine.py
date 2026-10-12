@@ -42,14 +42,46 @@ class Persona:
 
 @dataclass
 class Trigger:
-    """A keyword trigger: if ``pattern`` matches, draft ``reply_template``."""
+    """A keyword trigger: if ``pattern`` matches, draft ``reply_template``.
+
+    The regex is compiled at construction so a bad pattern in forge.yaml
+    fails fast with the trigger's name, instead of blowing up mid-draft
+    inside the chat worker.
+    """
     name: str
     pattern: str
     reply_template: str
     flags: int = re.IGNORECASE
 
+    def __post_init__(self):
+        try:
+            self._rx = re.compile(self.pattern, self.flags)
+        except re.error as e:
+            raise ValueError(
+                f"Trigger {self.name!r}: invalid regex pattern "
+                f"{self.pattern!r}: {e}") from e
+
     def matches(self, text: str) -> bool:
-        return re.search(self.pattern, text, self.flags) is not None
+        return self._rx.search(text) is not None
+
+
+def safe_format(template: str, **fields: Any) -> str:
+    """Format ``template`` substituting only the given fields.
+
+    Unknown ``{placeholders}`` are left literal instead of raising
+    KeyError -- reply templates are author-written and may contain
+    braces (prices like "{5}", emoticons). ``{{``/``}}`` escapes still
+    produce literal braces.
+    """
+    token_l, token_r = "\x00LBRACE\x00", "\x00RBRACE\x00"
+    work = template.replace("{{", token_l).replace("}}", token_r)
+
+    def repl(m: "re.Match") -> str:
+        key = m.group(1)
+        return str(fields[key]) if key in fields else m.group(0)
+
+    work = re.sub(r"\{([^{}]+)\}", repl, work)
+    return work.replace(token_l, "{").replace(token_r, "}")
 
 
 @dataclass
@@ -143,24 +175,37 @@ class ApprovalQueue:
             return list(self._drafts)
 
     def save(self, path: str | Path) -> None:
-        """Persist the queue to JSON so CLI runs share state."""
+        """Persist the queue to JSON so CLI runs share state.
+
+        Atomic: writes to a temp file then renames, so a concurrent
+        reader (dashboard) never sees a half-written file.
+        """
         import json
-        from dataclasses import asdict
+        import os
+        from dataclasses import asdict, fields
         from pathlib import Path as _P
         p = _P(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps([asdict(d) for d in self._drafts], indent=2),
-                     encoding="utf-8")
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps([asdict(d) for d in self._drafts], indent=2),
+                       encoding="utf-8")
+        os.replace(tmp, p)
 
     def load(self, path: str | Path) -> None:
-        """Load a persisted queue (missing file = empty)."""
+        """Load a persisted queue (missing file = empty).
+
+        Unknown keys in the JSON are ignored so a queue file written by
+        a newer version doesn't crash an older reader.
+        """
         import json
+        from dataclasses import fields
         from pathlib import Path as _P
         p = _P(path)
         if not p.is_file():
             return
+        known = {f.name for f in fields(Draft)}
         for d in json.loads(p.read_text(encoding="utf-8")):
-            draft = Draft(**d)
+            draft = Draft(**{k: v for k, v in d.items() if k in known})
             self._drafts.append(draft)
             self._next_id = max(self._next_id, draft.id + 1)
 
@@ -271,8 +316,8 @@ class RuleEngine:
             for trig in self.triggers:
                 if trig.matches(text):
                     trigger_name = trig.name
-                    reply = trig.reply_template.format(
-                        sender=sender, text=text,
+                    reply = safe_format(
+                        trig.reply_template, sender=sender, text=text,
                         persona=self.persona.name)
                     break
         draft = self.queue.add(platform=platform, sender=sender,
