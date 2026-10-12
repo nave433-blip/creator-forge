@@ -176,3 +176,82 @@ def test_send_paid_media_validation(tmp_path):
         bot.send_paid_media("@c", photo, 0)
     with pytest.raises(ValueError, match="positive"):
         bot.send_paid_media("@c", photo, -5)
+
+
+def test_retry_on_transient_503_then_success():
+    """A 503 is retried; success on the second attempt returns normally."""
+    from forge.telegram.bot import TelegramBot
+    attempts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) == 1:
+            return httpx.Response(503, text="Service Unavailable")
+        return httpx.Response(200, json={"ok": True, "result": {"ok": True}})
+
+    bot = TelegramBot("TOKEN123", client=_mock_client(handler),
+                      max_retries=2)
+    bot._sleep = lambda s: None  # no real waiting in tests
+    assert bot.status() == {"ok": True}
+    assert len(attempts) == 2
+
+
+def test_retry_exhausted_raises_transient():
+    from forge.telegram.bot import TelegramAPIError, TelegramBot
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="down")
+
+    bot = TelegramBot("TOKEN123", client=_mock_client(handler),
+                      max_retries=1)
+    bot._sleep = lambda s: None
+    with pytest.raises(TelegramAPIError) as exc:
+        bot.status()
+    assert exc.value.transient is True
+
+
+def test_rate_limit_honors_retry_after():
+    """429 with retry_after: sleeps the hinted duration, then succeeds."""
+    from forge.telegram.bot import TelegramBot
+    slept = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not slept:
+            return httpx.Response(429, json={
+                "ok": False, "error_code": 429,
+                "description": "Too Many Requests",
+                "parameters": {"retry_after": 7}})
+        return httpx.Response(200, json={"ok": True, "result": {"ok": True}})
+
+    bot = TelegramBot("TOKEN123", client=_mock_client(handler),
+                      max_retries=2)
+    bot._sleep = slept.append
+    assert bot.status() == {"ok": True}
+    assert slept == [7.0]
+
+
+def test_client_api_error_is_not_transient():
+    """ok=false (e.g. bad chat) raises immediately, flagged permanent."""
+    from forge.telegram.bot import TelegramAPIError, TelegramBot
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(400, json={
+            "ok": False, "description": "Bad Request: chat not found"})
+
+    bot = TelegramBot("TOKEN123", client=_mock_client(handler),
+                      max_retries=3)
+    with pytest.raises(TelegramAPIError) as exc:
+        bot.send_message("@nope", "hi")
+    assert exc.value.transient is False
+    assert len(calls) == 1  # no retry on permanent errors
+
+
+def test_send_paid_media_rejects_bool_stars(tmp_path):
+    from forge.telegram.bot import TelegramBot
+    bot, _ = _ok_bot()
+    photo = tmp_path / "p.jpg"
+    photo.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+    with pytest.raises(ValueError):
+        bot.send_paid_media("@c", photo, True, "cap")
