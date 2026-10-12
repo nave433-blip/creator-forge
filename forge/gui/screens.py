@@ -607,6 +607,101 @@ class PayScreen(_Base):
             self.table_holder.addWidget(lbl)
 
 
+# -- Promo --------------------------------------------------------------------------
+class PromoScreen(_Base):
+    def __init__(self, config: ForgeConfig):
+        super().__init__(config)
+        self.title("Promo links")
+        self.hint("UTM-tagged links per campaign. Clicks are counted only "
+                  "when fans come through YOUR short link "
+                  "(/promo/go/<code>) on a dashboard reachable from the "
+                  "internet -- raw hits, not uniques. Earnings are still "
+                  "logged manually from payout reports.")
+        form = QFormLayout()
+        self.url = QLineEdit()
+        self.url.setPlaceholderText("https://…")
+        form.addRow("URL:", self.url)
+        self.campaign = QLineEdit()
+        self.campaign.setPlaceholderText("e.g. summer-shoutout")
+        form.addRow("Campaign:", self.campaign)
+        self.source = QLineEdit()
+        self.source.setPlaceholderText("who's posting it (optional)")
+        form.addRow("Source:", self.source)
+        self.layout.addLayout(form)
+        row = QHBoxLayout()
+        create = QPushButton("Create link")
+        create.clicked.connect(self.create)
+        refresh = QPushButton("Refresh")
+        refresh.setObjectName("Ghost")
+        refresh.clicked.connect(self.refresh)
+        row.addWidget(create)
+        row.addWidget(refresh)
+        row.addStretch(1)
+        self.layout.addLayout(row)
+        self.table_holder = QVBoxLayout()
+        self.layout.addLayout(self.table_holder, 1)
+        self.refresh()
+
+    def _tracker(self):
+        from forge.promo.tracker import PromoTracker
+        return PromoTracker(self.config.get_path("promo.db_path",
+                                                 "./forge-data/promo.db"))
+
+    @_wrap
+    def create(self):
+        url = self.url.text().strip()
+        campaign = self.campaign.text().strip()
+        if not url or not campaign:
+            W.show_error(self, "Missing fields",
+                         "URL and campaign are both required.")
+            return
+        tracker = self._tracker()
+        try:
+            row = tracker.create_link(url, campaign,
+                                      source=self.source.text().strip())
+        finally:
+            tracker.close()
+        short = f"/promo/go/{row['code']}"
+        W.show_info(self, "Link created",
+                    f"Code: {row['code']}\nTagged URL:\n{row['full_url']}\n"
+                    f"Short link: {short}\n\nShort link copied to clipboard.")
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(short)
+        self.url.clear()
+        self.refresh()
+
+    @_wrap
+    def refresh(self):
+        tracker = self._tracker()
+        try:
+            links = tracker.list_links(limit=200)
+            counts = {}
+            for row in links:
+                counts[row["code"]] = tracker.click_count(row["code"])
+            report = {r["campaign"]: r for r in tracker.report()}
+        finally:
+            tracker.close()
+        W.clear_layout(self.table_holder)
+        if not links:
+            lbl = QLabel("No promo links yet -- create one above.")
+            lbl.setObjectName("Dim")
+            self.table_holder.addWidget(lbl)
+            return
+        rows = []
+        for row in links:
+            rep = report.get(row["campaign"], {})
+            rows.append([row["code"], row["campaign"],
+                         str(counts.get(row["code"], 0)),
+                         f"${rep.get('earnings', 0):.2f}",
+                         row["full_url"]])
+        self.table_holder.addWidget(W.make_table(
+            ["Code", "Campaign", "Clicks", "Attributed $", "Tagged URL"], rows))
+        note = QLabel("Clicks = raw hits through your short links. "
+                      "Earnings = manually logged from payout reports.")
+        note.setObjectName("Dim")
+        self.table_holder.addWidget(note)
+
+
 # -- Vault -------------------------------------------------------------------------
 class VaultScreen(_Base):
     def __init__(self, config: ForgeConfig):
@@ -1931,6 +2026,7 @@ SCREENS: list[tuple[str, type]] = [
     ("Post", PostScreen),
     ("Schedule", ScheduleScreen2),
     ("Pay", PayScreen),
+    ("Promo", PromoScreen),
     ("Vault", VaultScreen),
     ("Connect", ConnectScreen),
     ("Analytics", AnalyticsScreen2),
