@@ -342,3 +342,27 @@ def test_cli_has_new_commands():
                  ["chat", "template-list"]):
         r = runner.invoke(app, args)
         assert r.exit_code == 0, f"{args}: {r.output}"
+
+
+def test_vault_init_rejects_empty_password(tmp_path):
+    from forge.vault.store import Vault, VaultError
+    with pytest.raises(VaultError, match="must not be empty"):
+        Vault.init(tmp_path / "v", "")
+
+
+def test_vault_get_missing_blob_clean_error(tmp_path):
+    from forge.vault.store import Vault, VaultError
+    v = Vault.init(tmp_path / "v", "pw123")
+    with pytest.raises(VaultError, match="No blob 'nope'"):
+        v.get("nope")
+
+
+def test_vault_exists_and_atomic_put(tmp_path):
+    from forge.vault.store import Vault
+    v = Vault.init(tmp_path / "v", "pw123")
+    assert v.exists("a") is False
+    v.put("a", b"secret")
+    assert v.exists("a") is True
+    assert v.get("a") == b"secret"
+    # No temp files left behind after writes.
+    assert list((tmp_path / "v" / "data").glob("*.tmp")) == []

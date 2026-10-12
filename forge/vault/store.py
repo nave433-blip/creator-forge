@@ -68,6 +68,9 @@ class Vault:
         p = Path(path)
         if (p / "vault.json").exists():
             raise VaultError(f"Vault already exists at {p}.")
+        if not password:
+            raise VaultError("Password must not be empty -- an empty "
+                             "password means no encryption.")
         p.mkdir(parents=True, exist_ok=True)
         (p / "data").mkdir(exist_ok=True)
         salt = secrets.token_bytes(32)
@@ -155,11 +158,23 @@ class Vault:
         key = self._key()
         nonce = secrets.token_bytes(_NONCE_LEN)
         ct = AESGCM(key).encrypt(nonce, data, None)
-        self._blob_path(name).write_bytes(nonce + ct)
+        # Atomic write: a crash mid-write must not leave a truncated blob.
+        target = self._blob_path(name)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_bytes(nonce + ct)
+        os.replace(tmp, target)
+
+    def exists(self, name: str) -> bool:
+        """True if the blob exists (does not decrypt it)."""
+        self._key()  # ensure unlocked
+        return self._blob_path(name).is_file()
 
     def get(self, name: str) -> bytes:
         key = self._key()
-        raw = self._blob_path(name).read_bytes()
+        try:
+            raw = self._blob_path(name).read_bytes()
+        except FileNotFoundError as e:
+            raise VaultError(f"No blob {name!r} in the vault.") from e
         nonce, ct = raw[:_NONCE_LEN], raw[_NONCE_LEN:]
         try:
             return AESGCM(key).decrypt(nonce, ct, None)
