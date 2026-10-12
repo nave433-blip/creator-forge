@@ -121,3 +121,57 @@ def test_send_missing_media_file_clean_400(tmp_path, monkeypatch):
                     json={"photo": str(tmp_path / "nope.jpg")})
     assert r.status_code == 400
     assert "Traceback" not in r.text
+
+
+def _bot_with_handler(tmp_path, monkeypatch, handler, cfg_extra=""):
+    from forge.dashboard import app as dapp
+    from forge.telegram import bot as botmod
+    real_bot = botmod.TelegramBot
+
+    class FakeBot(real_bot):
+        def __init__(self, token):
+            super().__init__(token, client=httpx.Client(
+                transport=httpx.MockTransport(handler)))
+
+    monkeypatch.setattr(botmod, "TelegramBot", FakeBot)
+    cfg = tmp_path / "forge.yaml"
+    cfg.write_text("telegram: {bot_token: X, default_chat_id: '@c'}\n"
+                   + cfg_extra, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    return TestClient(dapp.create_app(str(cfg)))
+
+
+def test_send_paid_stars_garbage_is_400_not_500(tmp_path, monkeypatch):
+    client = _bot_with_handler(
+        tmp_path, monkeypatch,
+        lambda req: httpx.Response(200, json={"ok": True, "result": {}}))
+    r = client.post("/telegram/send",
+                    json={"text": "hi", "paid_stars": "lots"})
+    assert r.status_code == 400
+    assert "paid_stars" in r.json()["detail"]
+
+
+def test_send_paid_stars_negative_is_400(tmp_path, monkeypatch):
+    client = _bot_with_handler(
+        tmp_path, monkeypatch,
+        lambda req: httpx.Response(200, json={"ok": True, "result": {}}))
+    r = client.post("/telegram/send",
+                    json={"text": "hi", "paid_stars": -5})
+    assert r.status_code == 400
+
+
+def test_send_transient_upstream_is_502(tmp_path, monkeypatch):
+    client = _bot_with_handler(
+        tmp_path, monkeypatch,
+        lambda req: httpx.Response(503, text="Service Unavailable"))
+    r = client.post("/telegram/send", json={"text": "hi"})
+    assert r.status_code == 502
+
+
+def test_send_permanent_telegram_error_is_400(tmp_path, monkeypatch):
+    client = _bot_with_handler(
+        tmp_path, monkeypatch,
+        lambda req: httpx.Response(400, json={
+            "ok": False, "description": "Bad Request: chat not found"}))
+    r = client.post("/telegram/send", json={"text": "hi"})
+    assert r.status_code == 400

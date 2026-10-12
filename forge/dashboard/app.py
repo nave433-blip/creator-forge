@@ -594,7 +594,12 @@ async def telegram_send_endpoint(request: Request,
                                  ) -> JSONResponse:
     """Send via her bot. Body: {chat?, text?, photo?, video?, caption?,
     paid_stars?}. Media paths are server-local files. paid_stars puts the
-    media behind a Stars paywall (Stars economics live inside Telegram)."""
+    media behind a Stars paywall (Stars economics live inside Telegram).
+
+    The blocking Bot API calls run in a worker thread so a large media
+    upload never stalls the dashboard's event loop.
+    """
+    from anyio.to_thread import run_sync
     from forge.telegram.bot import TelegramAPIError
     try:
         body = await request.json()
@@ -606,27 +611,43 @@ async def telegram_send_endpoint(request: Request,
     if not chat_id:
         raise HTTPException(400, "Body needs {chat} or set "
                                  "telegram.default_chat_id.")
+    try:
+        paid_stars = int(body.get("paid_stars") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "paid_stars must be an integer number "
+                                 "of Stars.")
+    if paid_stars < 0:
+        raise HTTPException(400, "paid_stars must not be negative.")
     bot = _telegram_bot_or_400()
     caption = (body.get("caption") or "")
-    paid_stars = int(body.get("paid_stars") or 0)
-    try:
-        if body.get("photo") or body.get("video"):
-            path = body.get("photo") or body.get("video")
+    photo = body.get("photo")
+    video = body.get("video")
+
+    def _do_send():
+        if photo or video:
+            path = photo or video
             if paid_stars:
-                msg = bot.send_paid_media(str(chat_id), path, paid_stars,
-                                          caption)
-            elif body.get("photo"):
-                msg = bot.send_photo(str(chat_id), path, caption)
-            else:
-                msg = bot.send_video(str(chat_id), path, caption)
-        else:
-            text = (body.get("text") or "").strip()
-            if not text:
-                raise HTTPException(400, "Body needs {text} or "
-                                         "{photo|video}.")
-            msg = bot.send_message(str(chat_id), text)
-    except (TelegramAPIError, FileNotFoundError, ValueError) as e:
+                return bot.send_paid_media(str(chat_id), path, paid_stars,
+                                           caption), True
+            if photo:
+                return bot.send_photo(str(chat_id), path, caption), False
+            return bot.send_video(str(chat_id), path, caption), False
+        text = (body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "Body needs {text} or "
+                                     "{photo|video}.")
+        return bot.send_message(str(chat_id), text), False
+
+    try:
+        msg, paid = await run_sync(_do_send)
+    except HTTPException:
+        raise
+    except (FileNotFoundError, ValueError) as e:
         raise HTTPException(400, str(e))
+    except TelegramAPIError as e:
+        # Transient upstream failure (timeout/5xx/rate limit) -> 502;
+        # permanent Telegram rejection (bad chat, bad request) -> 400.
+        raise HTTPException(502 if e.transient else 400, str(e))
     return JSONResponse({"message_id": msg.get("message_id"),
                          "paid_stars": paid_stars or None})
 
